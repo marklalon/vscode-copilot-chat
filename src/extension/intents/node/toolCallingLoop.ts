@@ -37,6 +37,7 @@ import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 import { ChatResponsePullRequestPart, LanguageModelDataPart2, LanguageModelPartAudience, LanguageModelTextPart, LanguageModelToolResult2, MarkdownString } from '../../../vscodeTypes';
 import { InteractionOutcomeComputer } from '../../inlineChat/node/promptCraftingTypes';
+import { IMem0Service } from '../../mem0/common/mem0Types';
 import { ChatVariablesCollection } from '../../prompt/common/chatVariablesCollection';
 import { AnthropicTokenUsageMetadata, Conversation, IResultMetadata, ResponseStreamParticipant, TurnStatus } from '../../prompt/common/conversation';
 import { IBuildPromptContext, InternalToolReference, IToolCall, IToolCallRound } from '../../prompt/common/intents';
@@ -811,6 +812,9 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 					GenAiMetrics.recordAgentDuration(this._otelService, agentName, durationSec);
 					GenAiMetrics.recordAgentTurnCount(this._otelService, agentName, result.toolCallRounds.length);
 
+					// Async mem0 write-back: store conversation turn for long-term memory extraction
+					this._storeMem0Memory(result).catch(e => this._logService.warn(`[Mem0] write-back failed: ${e}`));
+
 					return result;
 				} catch (err) {
 					span.setStatus(SpanStatusCode.ERROR, err instanceof Error ? err.message : String(err));
@@ -821,6 +825,35 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 				}
 			},
 		);
+	}
+
+	private async _storeMem0Memory(result: IToolCallLoopResult): Promise<void> {
+		if (!this._configurationService.getConfig(ConfigKey.Mem0Enabled)) {
+			return;
+		}
+
+		// Only write on the final turn (model returned text without requesting more tools)
+		const lastRound = result.toolCallRounds.at(-1);
+		if (lastRound && lastRound.toolCalls.length > 0) {
+			return;
+		}
+
+		try {
+			const mem0Service: IMem0Service = this._instantiationService.invokeFunction(accessor => accessor.get(IMem0Service));
+			const responseText = lastRound?.response
+				? (Array.isArray(lastRound.response) ? lastRound.response.join('') : lastRound.response)
+				: undefined;
+			if (!responseText) {
+				return;
+			}
+			const userQuery = this.turn.request.message;
+			await mem0Service.add([
+				{ role: 'user', content: userQuery },
+				{ role: 'assistant', content: responseText },
+			]);
+		} catch {
+			// Silently ignore — mem0 write-back is best-effort
+		}
 	}
 
 	private async _runLoop(outputStream: ChatResponseStream | undefined, token: CancellationToken): Promise<IToolCallLoopResult> {

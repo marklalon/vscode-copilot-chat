@@ -111,6 +111,8 @@ import { INewWorkspacePreviewContentManager, NewWorkspacePreviewContentManagerIm
 import { ITestGenInfoStorage, TestGenInfoStorage } from '../../intents/node/testIntent/testInfoStorage';
 import { LanguageContextProviderService } from '../../languageContextProvider/vscode-node/languageContextProviderService';
 import { ILinkifyService, LinkifyService } from '../../linkify/common/linkifyService';
+import { IMem0Service } from '../../mem0/common/mem0Types';
+import { Mem0Service } from '../../mem0/node/mem0Service';
 import { DebugCommandToConfigConverter, IDebugCommandToConfigConverter } from '../../onboardDebug/node/commandToConfigConverter';
 import { DebuggableCommandIdentifier, IDebuggableCommandIdentifier } from '../../onboardDebug/node/debuggableCommandIdentifier';
 import { ILanguageToolsProvider, LanguageToolsProvider } from '../../onboardDebug/node/languageToolsProvider';
@@ -163,6 +165,7 @@ export function registerServices(builder: IInstantiationServiceBuilder, extensio
 	builder.define(ITokenizerProvider, new SyncDescriptor(TokenizerProvider, [true]));
 	builder.define(IToolsService, new SyncDescriptor(ToolsService));
 	builder.define(IAgentMemoryService, new SyncDescriptor(AgentMemoryService));
+	builder.define(IMem0Service, new SyncDescriptor(Mem0Service));
 	builder.define(IMemoryCleanupService, new SyncDescriptor(MemoryCleanupService));
 	builder.define(IChatDiskSessionResources, new SyncDescriptor(ChatDiskSessionResources));
 	builder.define(IRequestLogger, new SyncDescriptor(RequestLogger));

@@ -25,6 +25,7 @@ import { URI } from '../../../../util/vs/base/common/uri';
 import { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
 import { ChatRequestEditedFileEventKind, Position, Range } from '../../../../vscodeTypes';
 import { GenericBasePromptElementProps } from '../../../context/node/resolvers/genericPanelIntentInvocation';
+import { Mem0ContextPrompt } from '../../../mem0/node/mem0ContextPrompt';
 import { ChatVariablesCollection, isCustomizationsIndex } from '../../../prompt/common/chatVariablesCollection';
 import { getGlobalContextCacheKey, GlobalContextMessageMetadata, RenderedUserMessageMetadata, Turn } from '../../../prompt/common/conversation';
 import { InternalToolReference } from '../../../prompt/common/intents';
@@ -134,6 +135,7 @@ export class AgentPrompt extends PromptElement<AgentPromptProps> {
 		if (this.props.enableCacheBreakpoints) {
 			return <>
 				{baseInstructions}
+				<Mem0ContextPrompt priority={650} query={this.props.promptContext.query} />
 				<SummarizedConversationHistory
 					flexGrow={1}
 					triggerSummarize={this.props.triggerSummarize}
@@ -153,6 +155,7 @@ export class AgentPrompt extends PromptElement<AgentPromptProps> {
 		} else {
 			return <>
 				{baseInstructions}
+				<Mem0ContextPrompt priority={650} query={this.props.promptContext.query} />
 				<AgentConversationHistory flexGrow={1} priority={700} promptContext={this.props.promptContext} />
 				<AgentUserMessage flexGrow={2} priority={900} {...getUserMessagePropsFromAgentProps(this.props, { userQueryTagName, ReminderInstructionsClass, ToolReferencesHintClass })} />
 				<ChatToolCalls priority={899} flexGrow={2} promptContext={this.props.promptContext} toolCallRounds={this.props.promptContext.toolCallRounds} toolCallResults={this.props.promptContext.toolCallResults} truncateAt={maxToolResultLength} enableCacheBreakpoints={false} />

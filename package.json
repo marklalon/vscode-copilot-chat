@@ -3249,6 +3249,49 @@
 							"onExp"
 						]
 					},
+					"github.copilot.chat.mem0.enabled": {
+						"type": "boolean",
+						"default": false,
+						"markdownDescription": "Enable mem0 integration for long-term memory recall and automatic context injection."
+					},
+					"github.copilot.chat.mem0.endpoint": {
+						"type": "string",
+						"default": "http://127.0.0.1:8080",
+						"markdownDescription": "The HTTP endpoint of the local mem0 service."
+					},
+					"github.copilot.chat.mem0.userId": {
+						"type": "string",
+						"default": "",
+						"markdownDescription": "User ID for mem0 memory isolation. Defaults to OS username if empty."
+					},
+					"github.copilot.chat.mem0.compress": {
+						"type": "boolean",
+						"default": false,
+						"markdownDescription": "Enable memory context compression via a local LLM to deduplicate and reduce token usage when recalled memories exceed the compress threshold."
+					},
+					"github.copilot.chat.mem0.compressLlmEndpoint": {
+						"type": "string",
+						"default": "http://127.0.0.1:11434/v1",
+						"markdownDescription": "OpenAI-compatible endpoint for the LLM used to compress memory context (e.g. Ollama `http://127.0.0.1:11434/v1`, vLLM, LM Studio)."
+					},
+					"github.copilot.chat.mem0.compressLlmModel": {
+						"type": "string",
+						"default": "",
+						"markdownDescription": "Model name for the compression LLM. Leave empty to auto-detect the default model from the endpoint via `GET /models`."
+					},
+					"github.copilot.chat.mem0.minRelevanceScore": {
+						"type": "number",
+						"default": 0.5,
+						"minimum": 0,
+						"maximum": 1,
+						"markdownDescription": "Minimum relevance score (0–1) for mem0 memory recall. Memories below this threshold are filtered out."
+					},
+					"github.copilot.chat.mem0.compressThreshold": {
+						"type": "number",
+						"default": 2000,
+						"minimum": 0,
+						"markdownDescription": "Character length threshold for memory context compression. Compression is only triggered when the recalled memory text exceeds this length."
+					},
 					"github.copilot.chat.anthropic.thinking.forceExtendedThinking": {
 						"type": "boolean",
 						"markdownDescription": "%github.copilot.config.anthropic.thinking.forceExtendedThinking%",
