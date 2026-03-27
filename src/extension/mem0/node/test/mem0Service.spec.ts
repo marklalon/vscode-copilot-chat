@@ -260,8 +260,6 @@ describe('Mem0Service', () => {
 
 		beforeEach(() => {
 			configService.setConfig(ConfigKey.Mem0CompressEnabled, true);
-			configService.setConfig(ConfigKey.Mem0CompressLlmEndpoint, 'http://127.0.0.1:18081/v1');
-			configService.setConfig(ConfigKey.Mem0CompressLlmModel, 'test-model');
 		});
 
 		it('returns original text when disabled', async () => {
@@ -282,78 +280,36 @@ describe('Mem0Service', () => {
 			expect(result).toBe('   ');
 		});
 
-		it('calls LLM chat completion endpoint', async () => {
+		it('calls mem0 /compress endpoint', async () => {
 			const compressed = '1. Prefers TypeScript strict mode\n2. Uses pnpm';
-			mockFetcher.respondWith({
-				choices: [{ message: { content: compressed } }],
-			});
+			mockFetcher.respondWith({ compressed });
 
 			const result = await service.compressContext(sampleText);
 			expect(result).toBe(compressed);
 
 			const call = mockFetcher.fetchCalls[0];
-			expect(call.url).toBe('http://127.0.0.1:18081/v1/chat/completions');
+			expect(call.url).toBe('http://127.0.0.1:18000/compress');
 
 			const body = JSON.parse(call.options.body);
-			expect(body.model).toBe('test-model');
-			expect(body.temperature).toBe(0);
-			expect(body.messages).toHaveLength(2);
-			expect(body.messages[0].role).toBe('system');
-			expect(body.messages[1].role).toBe('user');
-			expect(body.messages[1].content).toBe(sampleText);
+			expect(body.text).toBe(sampleText);
 		});
 
-		it('returns original text on LLM HTTP error', async () => {
+		it('returns original text on HTTP error', async () => {
 			mockFetcher.fetchHandler = async () => new Response('err', { status: 500 });
 			const result = await service.compressContext(sampleText);
 			expect(result).toBe(sampleText);
 		});
 
-		it('returns original text on LLM network error', async () => {
-			mockFetcher.respondWithError('LLM unreachable');
+		it('returns original text on network error', async () => {
+			mockFetcher.respondWithError('compress unavailable');
 			const result = await service.compressContext(sampleText);
 			expect(result).toBe(sampleText);
 		});
 
-		it('returns original text when LLM returns empty content', async () => {
-			mockFetcher.respondWith({ choices: [{ message: { content: '' } }] });
+		it('returns original text when compress returns empty content', async () => {
+			mockFetcher.respondWith({ compressed: '' });
 			const result = await service.compressContext(sampleText);
 			expect(result).toBe(sampleText);
-		});
-
-		it('falls back to model discovery when model not configured', async () => {
-			await configService.setConfig(ConfigKey.Mem0CompressLlmModel, '');
-
-			mockFetcher.respondByUrl({
-				'/models': { data: [{ id: 'discovered-model' }] },
-				'/chat/completions': { choices: [{ message: { content: 'compressed' } }] },
-			});
-
-			const result = await service.compressContext(sampleText);
-			expect(result).toBe('compressed');
-
-			// Should have called /models first, then /chat/completions
-			expect(mockFetcher.fetchCalls).toHaveLength(2);
-			expect(mockFetcher.fetchCalls[0].url).toContain('/models');
-
-			const body = JSON.parse(mockFetcher.fetchCalls[1].options.body);
-			expect(body.model).toBe('discovered-model');
-		});
-
-		it('caches discovered model across calls', async () => {
-			await configService.setConfig(ConfigKey.Mem0CompressLlmModel, '');
-
-			mockFetcher.respondByUrl({
-				'/models': { data: [{ id: 'cached-model' }] },
-				'/chat/completions': { choices: [{ message: { content: 'compressed' } }] },
-			});
-
-			await service.compressContext(sampleText);
-			await service.compressContext(sampleText);
-
-			// /models should only be called once due to caching
-			const modelCalls = mockFetcher.fetchCalls.filter(c => c.url.includes('/models'));
-			expect(modelCalls).toHaveLength(1);
 		});
 	});
 

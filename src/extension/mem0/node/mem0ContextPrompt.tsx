@@ -9,7 +9,7 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { Tag } from '../../prompts/node/base/tag';
 import { IMem0Service, Mem0Memory } from '../common/mem0Types';
 
-const MAX_MEM0_CONTEXT_TOKENS = 1500;
+const MAX_MEM0_CONTEXT_TOKENS = 2000;
 
 export interface Mem0ContextPromptProps extends BasePromptElementProps {
 	readonly query: string;

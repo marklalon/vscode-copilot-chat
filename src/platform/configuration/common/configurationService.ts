@@ -994,8 +994,6 @@ export namespace ConfigKey {
 	export const Mem0Endpoint = defineSetting<string>('chat.mem0.endpoint', ConfigType.Simple, 'http://127.0.0.1:8080');
 	export const Mem0UserId = defineSetting<string>('chat.mem0.userId', ConfigType.Simple, '');
 	export const Mem0CompressEnabled = defineSetting<boolean>('chat.mem0.compress', ConfigType.Simple, false);
-	export const Mem0CompressLlmEndpoint = defineSetting<string>('chat.mem0.compressLlmEndpoint', ConfigType.Simple, 'http://127.0.0.1:11434/v1');
-	export const Mem0CompressLlmModel = defineSetting<string>('chat.mem0.compressLlmModel', ConfigType.Simple, '');
 	export const Mem0MinRelevanceScore = defineSetting<number>('chat.mem0.minRelevanceScore', ConfigType.Simple, 0.5);
 	export const Mem0CompressThreshold = defineSetting<number>('chat.mem0.compressThreshold', ConfigType.Simple, 2000);
 }

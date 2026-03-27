@@ -135,7 +135,7 @@ export class AgentPrompt extends PromptElement<AgentPromptProps> {
 		if (this.props.enableCacheBreakpoints) {
 			return <>
 				{baseInstructions}
-				<Mem0ContextPrompt priority={650} query={this.props.promptContext.query} />
+				<SystemMessage priority={650}><Mem0ContextPrompt query={this.props.promptContext.query} /></SystemMessage>
 				<SummarizedConversationHistory
 					flexGrow={1}
 					triggerSummarize={this.props.triggerSummarize}
@@ -155,7 +155,7 @@ export class AgentPrompt extends PromptElement<AgentPromptProps> {
 		} else {
 			return <>
 				{baseInstructions}
-				<Mem0ContextPrompt priority={650} query={this.props.promptContext.query} />
+				<SystemMessage priority={650}><Mem0ContextPrompt query={this.props.promptContext.query} /></SystemMessage>
 				<AgentConversationHistory flexGrow={1} priority={700} promptContext={this.props.promptContext} />
 				<AgentUserMessage flexGrow={2} priority={900} {...getUserMessagePropsFromAgentProps(this.props, { userQueryTagName, ReminderInstructionsClass, ToolReferencesHintClass })} />
 				<ChatToolCalls priority={899} flexGrow={2} promptContext={this.props.promptContext} toolCallRounds={this.props.promptContext.toolCallRounds} toolCallResults={this.props.promptContext.toolCallResults} truncateAt={maxToolResultLength} enableCacheBreakpoints={false} />

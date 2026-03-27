@@ -44,7 +44,7 @@ User Message
 | File | Purpose |
 |------|---------|
 | `common/mem0Types.ts` | `IMem0Service` interface, `Mem0Memory`, `Mem0AddResult` types |
-| `node/mem0Service.ts` | Service implementation — HTTP client for mem0 REST API + LLM compression |
+| `node/mem0Service.ts` | Service implementation — HTTP client for mem0 REST API |
 | `node/mem0ContextPrompt.tsx` | TSX prompt component that renders recalled memories |
 | `node/test/mem0Service.spec.ts` | 24 unit tests |
 
@@ -67,10 +67,8 @@ All settings are under `github.copilot.chat.mem0.*` in VS Code Settings (`Ctrl+,
 | `endpoint` | string | `http://127.0.0.1:8080` | mem0 REST API base URL |
 | `userId` | string | `""` | User ID for memory isolation (empty = machineId) |
 | `minRelevanceScore` | number | `0.5` | Minimum score to include a recalled memory |
-| `compressEnabled` | boolean | `false` | Enable LLM-based dedup/compression of memory context |
+| `compressEnabled` | boolean | `false` | Enable dedup/compression of recalled memory context via mem0 `/compress` |
 | `compressThreshold` | number | `2000` | Character count threshold to trigger compression |
-| `compressLlmEndpoint` | string | `http://127.0.0.1:11434/v1` | OpenAI-compatible LLM endpoint for compression |
-| `compressLlmModel` | string | `""` | Model name for compression (empty = auto-discover from `/v1/models`) |
 
 ## mem0 API Endpoints
 
@@ -81,6 +79,7 @@ The self-hosted mem0 Docker uses these paths (**no `/v1/` prefix**):
 | POST | `/search` | 5s | Semantic memory search |
 | POST | `/memories` | 30s | Add memories (slow — internal LLM extraction) |
 | GET | `/memories?user_id=` | 5s | Get all memories for a user |
+| POST | `/compress` | 15s | Deduplicate and compress memory context using server-side LLM |
 
 ## Prerequisites
 
@@ -93,9 +92,9 @@ The self-hosted mem0 Docker uses these paths (**no `/v1/` prefix**):
    - Set `github.copilot.chat.mem0.enabled` to `true`
    - Set `github.copilot.chat.mem0.endpoint` to your mem0 URL
 
-3. (Optional) **Compression LLM** — any OpenAI-compatible endpoint (e.g., Ollama, vLLM, LM Studio):
+3. (Optional) **Compression** — deduplicate recalled memories before injecting into prompt:
    - Set `compressEnabled` to `true`
-   - Set `compressLlmEndpoint` to your LLM URL
+   - Compression is handled server-side by the mem0 service (`POST /compress`) using its own configured LLM — no extra client-side LLM configuration needed
 
 ## Logging
 
