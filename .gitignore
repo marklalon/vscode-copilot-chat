@@ -41,6 +41,8 @@ test/aml/out
 # claude
 .claude/settings.local.json
 
+.vscode/
+
 # VS Code extension debug profile (agent-browser automation)
 .vscode-ext-debug/
 

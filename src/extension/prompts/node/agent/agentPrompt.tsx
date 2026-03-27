@@ -131,11 +131,12 @@ export class AgentPrompt extends PromptElement<AgentPromptProps> {
 		const userQueryTagName = customizations.userQueryTagName;
 		const ReminderInstructionsClass = customizations.ReminderInstructionsClass;
 		const ToolReferencesHintClass = customizations.ToolReferencesHintClass;
+		const shouldRenderMem0Context = (this.props.promptContext.toolCallRounds?.length ?? 0) === 0;
 
 		if (this.props.enableCacheBreakpoints) {
 			return <>
 				{baseInstructions}
-				<SystemMessage priority={650}><Mem0ContextPrompt query={this.props.promptContext.query} /></SystemMessage>
+				{shouldRenderMem0Context && <SystemMessage priority={650}><Mem0ContextPrompt query={this.props.promptContext.query} /></SystemMessage>}
 				<SummarizedConversationHistory
 					flexGrow={1}
 					triggerSummarize={this.props.triggerSummarize}
@@ -155,7 +156,7 @@ export class AgentPrompt extends PromptElement<AgentPromptProps> {
 		} else {
 			return <>
 				{baseInstructions}
-				<SystemMessage priority={650}><Mem0ContextPrompt query={this.props.promptContext.query} /></SystemMessage>
+				{shouldRenderMem0Context && <SystemMessage priority={650}><Mem0ContextPrompt query={this.props.promptContext.query} /></SystemMessage>}
 				<AgentConversationHistory flexGrow={1} priority={700} promptContext={this.props.promptContext} />
 				<AgentUserMessage flexGrow={2} priority={900} {...getUserMessagePropsFromAgentProps(this.props, { userQueryTagName, ReminderInstructionsClass, ToolReferencesHintClass })} />
 				<ChatToolCalls priority={899} flexGrow={2} promptContext={this.props.promptContext} toolCallRounds={this.props.promptContext.toolCallRounds} toolCallResults={this.props.promptContext.toolCallResults} truncateAt={maxToolResultLength} enableCacheBreakpoints={false} />

@@ -60,12 +60,6 @@ export interface IMem0Service {
 	 * Get all memories for the current user.
 	 */
 	getAll(): Promise<readonly Mem0Memory[]>;
-
-	/**
-	 * Compress/deduplicate a block of memory context text using mem0's LLM.
-	 * Returns the original text if compression is unavailable or fails.
-	 */
-	compressContext(text: string): Promise<string>;
 }
 
 export const IMem0Service = createServiceIdentifier<IMem0Service>('IMem0Service');

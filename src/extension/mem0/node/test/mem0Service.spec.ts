@@ -6,8 +6,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ConfigKey, IConfigurationService } from '../../../../platform/configuration/common/configurationService';
 import { InMemoryConfigurationService } from '../../../../platform/configuration/test/common/inMemoryConfigurationService';
+import { IFileSystemService } from '../../../../platform/filesystem/common/fileSystemService';
+import { MockFileSystemService } from '../../../../platform/filesystem/node/test/mockFileSystemService';
 import { IFetcherService } from '../../../../platform/networking/common/fetcherService';
+import { IWorkspaceService, NullWorkspaceService } from '../../../../platform/workspace/common/workspaceService';
 import { DisposableStore } from '../../../../util/vs/base/common/lifecycle';
+import { URI } from '../../../../util/vs/base/common/uri';
+import { isUUID } from '../../../../util/vs/base/common/uuid';
 import { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
 import { createExtensionUnitTestingServices } from '../../../test/node/services';
 import { Mem0Memory } from '../../common/mem0Types';
@@ -83,22 +88,29 @@ describe('Mem0Service', () => {
 	let disposables: DisposableStore;
 	let configService: InMemoryConfigurationService;
 	let mockFetcher: MockFetcherService;
+	let mockFileSystemService: MockFileSystemService;
 	let service: Mem0Service;
 	let instantiationService: IInstantiationService;
+	let workspaceFolder: URI;
+	let mem0ConfigFile: URI;
 
 	beforeEach(() => {
 		disposables = new DisposableStore();
 		const sc = createExtensionUnitTestingServices(disposables);
 		mockFetcher = new MockFetcherService();
 		sc.define(IFetcherService, mockFetcher as any);
+		workspaceFolder = URI.file('/workspace/project-a');
+		sc.define(IWorkspaceService, new NullWorkspaceService([workspaceFolder]));
 		const accessor = disposables.add(sc.createTestingAccessor());
 		configService = accessor.get(IConfigurationService) as InMemoryConfigurationService;
 		instantiationService = accessor.get(IInstantiationService);
+		mockFileSystemService = accessor.get(IFileSystemService) as MockFileSystemService;
+		mem0ConfigFile = URI.joinPath(workspaceFolder, '.vscode', 'mem0.json');
+		mockFileSystemService.mockFile(mem0ConfigFile, JSON.stringify({ userId: 'test-user' }));
 
 		// Default: mem0 enabled, endpoints pointing to test servers
 		configService.setConfig(ConfigKey.Mem0Enabled, true);
 		configService.setConfig(ConfigKey.Mem0Endpoint, 'http://127.0.0.1:18000');
-		configService.setConfig(ConfigKey.Mem0UserId, 'test-user');
 
 		service = instantiationService.createInstance(Mem0Service);
 		disposables.add(service);
@@ -253,79 +265,30 @@ describe('Mem0Service', () => {
 		});
 	});
 
-	// ── compressContext ─────────────────────────────────────
-
-	describe('compressContext', () => {
-		const sampleText = '1. User prefers TypeScript\n2. User prefers TypeScript strict mode\n3. Uses pnpm';
-
-		beforeEach(() => {
-			configService.setConfig(ConfigKey.Mem0CompressEnabled, true);
-		});
-
-		it('returns original text when disabled', async () => {
-			await configService.setConfig(ConfigKey.Mem0Enabled, false);
-			const result = await service.compressContext(sampleText);
-			expect(result).toBe(sampleText);
-			expect(mockFetcher.fetchCalls).toHaveLength(0);
-		});
-
-		it('returns original text when compress disabled', async () => {
-			await configService.setConfig(ConfigKey.Mem0CompressEnabled, false);
-			const result = await service.compressContext(sampleText);
-			expect(result).toBe(sampleText);
-		});
-
-		it('returns original text for empty input', async () => {
-			const result = await service.compressContext('   ');
-			expect(result).toBe('   ');
-		});
-
-		it('calls mem0 /compress endpoint', async () => {
-			const compressed = '1. Prefers TypeScript strict mode\n2. Uses pnpm';
-			mockFetcher.respondWith({ compressed });
-
-			const result = await service.compressContext(sampleText);
-			expect(result).toBe(compressed);
-
-			const call = mockFetcher.fetchCalls[0];
-			expect(call.url).toBe('http://127.0.0.1:18000/compress');
-
-			const body = JSON.parse(call.options.body);
-			expect(body.text).toBe(sampleText);
-		});
-
-		it('returns original text on HTTP error', async () => {
-			mockFetcher.fetchHandler = async () => new Response('err', { status: 500 });
-			const result = await service.compressContext(sampleText);
-			expect(result).toBe(sampleText);
-		});
-
-		it('returns original text on network error', async () => {
-			mockFetcher.respondWithError('compress unavailable');
-			const result = await service.compressContext(sampleText);
-			expect(result).toBe(sampleText);
-		});
-
-		it('returns original text when compress returns empty content', async () => {
-			mockFetcher.respondWith({ compressed: '' });
-			const result = await service.compressContext(sampleText);
-			expect(result).toBe(sampleText);
-		});
-	});
-
-	// ── userId fallback ────────────────────────────────────
+	// ── userId resolution ────────────────────────────────────
 
 	describe('userId resolution', () => {
-		it('falls back to machineId when no userId configured', async () => {
-			await configService.setConfig(ConfigKey.Mem0UserId, '');
+		it('uses userId from project .vscode/mem0.json', async () => {
+			mockFetcher.respondWith({ results: [] });
+			await service.search('test');
+
+			const body = JSON.parse(mockFetcher.fetchCalls[0].options.body);
+			expect(body.user_id).toBe('test-user');
+		});
+
+		it('generates and persists project userId when .vscode/mem0.json is missing', async () => {
+			await mockFileSystemService.delete(mem0ConfigFile);
 			mockFetcher.respondWith({ results: [] });
 
 			await service.search('test');
 
 			const body = JSON.parse(mockFetcher.fetchCalls[0].options.body);
-			// Should use machineId or 'default' from NullEnvService
-			expect(body.user_id).toBeDefined();
-			expect(body.user_id).not.toBe('');
+			expect(body.user_id.startsWith('workspace:')).toBe(true);
+			expect(isUUID(body.user_id.slice('workspace:'.length))).toBe(true);
+
+			const persistedRaw = await mockFileSystemService.readFile(mem0ConfigFile);
+			const persisted = JSON.parse(new TextDecoder().decode(persistedRaw)) as { userId?: string };
+			expect(persisted.userId).toBe(body.user_id);
 		});
 	});
 });

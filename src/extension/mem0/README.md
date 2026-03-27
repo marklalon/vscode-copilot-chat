@@ -35,9 +35,11 @@ User Message
 └──────────────┘                      └─────────┘
 ```
 
-**Recall**: Every turn, `Mem0ContextPrompt` searches mem0 for memories semantically relevant to the user's message, filters by relevance score, and injects them into the prompt.
+**Recall**: On the first model request for each user turn, `Mem0ContextPrompt` searches mem0 for memories semantically relevant to the user's message, filters by relevance score, and injects them into the prompt.
 
 **Write-back**: Only on the final conversation turn, `toolCallingLoop` sends the user+assistant messages to mem0 asynchronously. mem0 internally uses an LLM to extract and deduplicate facts.
+
+**Smart Compact**: The normal `/compact` flow keeps using Copilot's summarization pipeline, but it can optionally redirect the LLM call to a local OpenAI-compatible endpoint via `github.copilot.chat.mem0.compactLlmEndpoint`.
 
 ## Files
 
@@ -46,7 +48,7 @@ User Message
 | `common/mem0Types.ts` | `IMem0Service` interface, `Mem0Memory`, `Mem0AddResult` types |
 | `node/mem0Service.ts` | Service implementation — HTTP client for mem0 REST API |
 | `node/mem0ContextPrompt.tsx` | TSX prompt component that renders recalled memories |
-| `node/test/mem0Service.spec.ts` | 24 unit tests |
+| `node/test/mem0Service.spec.ts` | 23 unit tests |
 
 ### Modified files (outside this directory)
 
@@ -59,15 +61,28 @@ User Message
 
 ## Settings
 
-All settings are under `github.copilot.chat.mem0.*` in VS Code Settings (`Ctrl+,`, search `mem0`).
+UI-exposed settings are under `github.copilot.chat.mem0.*` in VS Code Settings (`Ctrl+,`, search `mem0`).
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `enabled` | boolean | `false` | Master toggle for mem0 integration |
 | `endpoint` | string | `http://127.0.0.1:8080` | mem0 REST API base URL |
-| `userId` | string | `""` | User ID for memory isolation (empty = machineId) |
 | `minRelevanceScore` | number | `0.5` | Minimum score to include a recalled memory |
-| `compressEnabled` | boolean | `true` | Reserved for future use (current prompt path does not invoke compression) |
+| `compactLlmEndpoint` | string | `""` | Optional `/v1` base URL for a local OpenAI-compatible model used by Smart Compact (`/compact`) |
+
+### Project-scoped user ID
+
+mem0 user isolation now uses a project-scoped identifier stored in `.vscode/mem0.json`:
+
+```json
+{
+   "userId": "workspace:550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+- If `.vscode/mem0.json` exists and contains `userId`, that value is used.
+- If it is missing/invalid, a new `workspace:<uuid>` value is generated and written back to `.vscode/mem0.json`.
+- `github.copilot.chat.mem0.userId` is no longer exposed in Settings UI.
 
 ## mem0 API Endpoints
 
@@ -78,7 +93,6 @@ The self-hosted mem0 Docker uses these paths (**no `/v1/` prefix**):
 | POST | `/search` | 5s | Semantic memory search |
 | POST | `/memories` | 30s | Add memories (slow — internal LLM extraction) |
 | GET | `/memories?user_id=` | 5s | Get all memories for a user |
-| POST | `/compress` | 15s | Deduplicate and compress memory context using server-side LLM |
 
 ## Prerequisites
 
@@ -91,9 +105,10 @@ The self-hosted mem0 Docker uses these paths (**no `/v1/` prefix**):
    - Set `github.copilot.chat.mem0.enabled` to `true`
    - Set `github.copilot.chat.mem0.endpoint` to your mem0 URL
 
-3. **Compression status**:
-   - The current mem0 prompt injection path does not invoke compression.
-   - Compression settings and tests are kept for future integration work.
+3. **Optional Smart Compact override**:
+   - Set `github.copilot.chat.mem0.compactLlmEndpoint` to a local OpenAI-compatible `/v1` base URL if you want `/compact` to use a local model.
+   - Example values: `http://127.0.0.1:18081/v1`.
+   - If this setting is empty, `/compact` uses the normal Copilot model selection flow.
 
 ## Logging
 
@@ -116,8 +131,9 @@ Set log level to **Trace** to see success logs: `Ctrl+Shift+P` → `Developer: S
 
 ## Design Decisions
 
-- **Per-turn recall**: mem0 search runs every turn because the query changes; existing `MemoryContextPrompt` remains first-turn only
+- **Per-user-turn recall**: mem0 search runs on the first model request of each user turn to avoid repeated recalls during tool-call iterations
 - **Last-turn-only write**: Avoids redundant writes mid-conversation when tool calls are still in progress
+- **Compaction decoupled from mem0**: mem0 no longer owns conversation compaction; `/compact` stays in the summarization pipeline and only swaps the target LLM URL when configured
 - **Fire-and-forget**: Write-back is async and best-effort — never blocks or fails the chat
 - **Graceful fallback**: All mem0 calls return empty/original on failure
 - **Score filtering**: Reduces noise from low-relevance memories before injecting into prompt

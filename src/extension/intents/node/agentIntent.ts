@@ -8,7 +8,7 @@ import { Raw, RenderPromptResult } from '@vscode/prompt-tsx';
 import { BudgetExceededError } from '@vscode/prompt-tsx/dist/base/materialized';
 import type * as vscode from 'vscode';
 import { IChatSessionService } from '../../../platform/chat/common/chatSessionService';
-import { ChatLocation, ChatResponse } from '../../../platform/chat/common/commonTypes';
+import { ChatFetchResponseType, ChatLocation, ChatResponse } from '../../../platform/chat/common/commonTypes';
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { isAnthropicFamily, isGptFamily, modelCanUseApplyPatchExclusively, modelCanUseReplaceStringExclusively, modelSupportsApplyPatch, modelSupportsMultiReplaceString, modelSupportsReplaceString, modelSupportsSimplifiedApplyPatchInstructions } from '../../../platform/endpoint/common/chatModelCapabilities';
 import { IEndpointProvider } from '../../../platform/endpoint/common/endpointProvider';
@@ -17,8 +17,9 @@ import { IEnvService } from '../../../platform/env/common/envService';
 import { ILogService } from '../../../platform/log/common/logService';
 import { IEditLogService } from '../../../platform/multiFileEdit/common/editLogService';
 import { CUSTOM_TOOL_SEARCH_NAME, isAnthropicCustomToolSearchEnabled } from '../../../platform/networking/common/anthropic';
-import { IChatEndpoint } from '../../../platform/networking/common/networking';
-import { modelsWithoutResponsesContextManagement } from '../../../platform/networking/common/openai';
+import { IFetcherService, NO_FETCH_TELEMETRY } from '../../../platform/networking/common/fetcherService';
+import { IChatEndpoint, ICreateEndpointBodyOptions, IEndpointBody, IEndpointFetchOptions, IMakeChatRequestOptions } from '../../../platform/networking/common/networking';
+import { getCAPITextPart, modelsWithoutResponsesContextManagement, rawMessageToCAPI } from '../../../platform/networking/common/openai';
 import { INotebookService } from '../../../platform/notebook/common/notebookService';
 import { IPromptPathRepresentationService } from '../../../platform/prompts/common/promptPathRepresentationService';
 import { ITasksService } from '../../../platform/tasks/common/tasksService';
@@ -27,8 +28,10 @@ import { ITelemetryService } from '../../../platform/telemetry/common/telemetry'
 import { ITestProvider } from '../../../platform/testing/common/testProvider';
 import { IWorkspaceService } from '../../../platform/workspace/common/workspaceService';
 
+import { CancellationToken } from '../../../util/vs/base/common/cancellation';
 import { isCancellationError } from '../../../util/vs/base/common/errors';
 import { Iterable } from '../../../util/vs/base/common/iterator';
+import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { IInstantiationService, ServicesAccessor } from '../../../util/vs/platform/instantiation/common/instantiation';
 
 import { ChatResponseProgressPart2 } from '../../../vscodeTypes';
@@ -65,6 +68,19 @@ function isResponsesCompactionContextManagementEnabled(endpoint: IChatEndpoint, 
 		&& !modelsWithoutResponsesContextManagement.has(endpoint.family);
 }
 
+const COMPACT_SYSTEM_PROMPT = `You are a memory context compressor for an AI coding assistant. Your task is to deduplicate and lightly consolidate a list of recalled long-term memory entries while retaining all distinct and useful information.
+Rules:
+1. Only merge entries that are truly identical in meaning; when in doubt, keep them separate.
+2. Remove exact duplicates, keeping the most detailed version.
+3. NEVER drop or shorten specific technical values: error messages, config keys, environment variable names, model names, version numbers, parameter names, service names.
+4. NEVER truncate, abbreviate, or paraphrase any file path (absolute or relative, any OS convention), directory path, or URL — reproduce them character-for-character exactly as they appear in the input. This includes paths to user-attached files, workspace files, configuration files, and any HTTP/HTTPS/file/custom-scheme URLs.
+5. Preserve all distinct insights: root causes, workarounds, compatibility constraints, architectural decisions and their rationale, debugging conclusions.
+6. If two entries cover the same topic but contain different technical specifics (including different paths or URLs), keep both or merge only the non-conflicting parts, retaining all specifics.
+7. Keep the output as a numbered list - one fact per line, no commentary.
+8. Do NOT invent or infer new information. Only reorganize what is given.
+9. Maintain the original language of each entry (do not translate).
+10. Output ONLY the compressed list, nothing else.`;
+
 export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.ChatRequest) => {
 	const toolsService = accessor.get<IToolsService>(IToolsService);
 	const testService = accessor.get<ITestProvider>(ITestProvider);
@@ -78,7 +94,7 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 	const allowTools: Record<string, boolean> = {};
 
 	const learned = editToolLearningService.getPreferredEndpointEditTool(model);
-	if (learned) { // a learning-enabled (BYOK) model, we should go with what it prefers
+	if (learned) {
 		allowTools[ToolName.EditFile] = learned.includes(ToolName.EditFile);
 		allowTools[ToolName.ReplaceString] = learned.includes(ToolName.ReplaceString);
 		allowTools[ToolName.MultiReplaceString] = learned.includes(ToolName.MultiReplaceString);
@@ -116,12 +132,9 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 		allowTools[ToolName.CoreManageTodoList] = false;
 	}
 
-	// Enable task_complete in autopilot mode so the model can signal task completion.
-	// The tool is registered in core as a built-in but needs explicit opt-in here.
 	allowTools['task_complete'] = request.permissionLevel === 'autopilot';
 
 	allowTools[ToolName.EditFilesPlaceholder] = false;
-	// todo@connor4312: string check here is for back-compat for 1.109 Insiders
 	if (Iterable.some(request.tools, ([t, enabled]) => (typeof t === 'string' ? t : t.name) === ContributedToolName.EditFilesPlaceholder && enabled === false)) {
 		allowTools[ToolName.ApplyPatch] = false;
 		allowTools[ToolName.EditFile] = false;
@@ -140,7 +153,6 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 			return allowTools[tool.name];
 		}
 
-		// Must return undefined to fall back to other checks
 		return undefined;
 	});
 
@@ -246,6 +258,11 @@ export class AgentIntent extends EditCodeIntent {
 			return {};
 		}
 
+		const compactLlmUrl = this.configurationService.getConfig(ConfigKey.CompactLlmEndpoint)?.trim();
+		const compactEndpoint = compactLlmUrl
+			? this.instantiationService.createInstance(CompactLlmOverrideEndpoint, endpoint, compactLlmUrl)
+			: endpoint;
+
 		const promptContext: IBuildPromptContext = {
 			history,
 			chatVariables: new ChatVariablesCollection([]),
@@ -258,7 +275,7 @@ export class AgentIntent extends EditCodeIntent {
 			const propsBuilder = this.instantiationService.createInstance(SummarizedConversationHistoryPropsBuilder);
 			const propsInfo = propsBuilder.getProps({
 				priority: 1,
-				endpoint,
+				endpoint: compactEndpoint,
 				location: ChatLocation.Agent,
 				promptContext,
 				maxToolResultLength: Infinity,
@@ -269,7 +286,7 @@ export class AgentIntent extends EditCodeIntent {
 			const progress: vscode.Progress<vscode.ChatResponseReferencePart | vscode.ChatResponseProgressPart> = {
 				report: () => { }
 			};
-			const renderer = PromptRenderer.create(this.instantiationService, endpoint, SummarizedConversationHistory, {
+			const renderer = PromptRenderer.create(this.instantiationService, compactEndpoint, SummarizedConversationHistory, {
 				...propsInfo.props,
 				triggerSummarize: true,
 				summarizationInstructions: request.prompt || undefined,
@@ -291,7 +308,7 @@ export class AgentIntent extends EditCodeIntent {
 
 			stream.markdown(l10n.t('Compacted conversation.'));
 			const lastTurn = conversation.getLatestTurn();
-			// Next turn if using auto will select a new endpoint
+			// Next turn if using auto will select a new endpoint.
 			this._automodeService.invalidateRouterCache(request);
 
 			const chatResult: vscode.ChatResult = {
@@ -303,8 +320,6 @@ export class AgentIntent extends EditCodeIntent {
 				}
 			};
 
-			// setResponse must be called so that turn.resultMetadata?.summary
-			// is available for normalizeSummariesOnRounds on subsequent turns.
 			lastTurn.setResponse(
 				TurnStatus.Success,
 				{ type: 'model', message: '' },
@@ -323,6 +338,224 @@ export class AgentIntent extends EditCodeIntent {
 			const message = e instanceof Error ? e.message : String(e);
 			stream.markdown(l10n.t('Failed to compact conversation: {0}', message));
 			return {};
+		}
+	}
+}
+
+class CompactLlmOverrideEndpoint implements IChatEndpoint {
+	constructor(
+		private readonly base: IChatEndpoint,
+		private readonly compactLlmUrl: string,
+		@IFetcherService private readonly fetcherService: IFetcherService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@ILogService private readonly logService: ILogService,
+	) { }
+
+	get urlOrRequestMetadata() { return this.base.urlOrRequestMetadata; }
+	get name() { return this.base.name; }
+	get version() { return this.base.version; }
+	get family() { return this.base.family; }
+	get tokenizer() { return this.base.tokenizer; }
+	get modelMaxPromptTokens() { return this.base.modelMaxPromptTokens; }
+	get maxOutputTokens() { return this.base.maxOutputTokens; }
+	get model() { return this.base.model; }
+	get modelProvider() { return this.base.modelProvider; }
+	get apiType() { return this.base.apiType; }
+	get supportsThinkingContentInHistory() { return this.base.supportsThinkingContentInHistory; }
+	get supportsAdaptiveThinking() { return this.base.supportsAdaptiveThinking; }
+	get minThinkingBudget() { return this.base.minThinkingBudget; }
+	get maxThinkingBudget() { return this.base.maxThinkingBudget; }
+	get supportsReasoningEffort() { return this.base.supportsReasoningEffort; }
+	get supportsToolCalls() { return this.base.supportsToolCalls; }
+	get supportsVision() { return this.base.supportsVision; }
+	get supportsPrediction() { return this.base.supportsPrediction; }
+	get supportedEditTools() { return this.base.supportedEditTools; }
+	get showInModelPicker() { return this.base.showInModelPicker; }
+	get isPremium() { return this.base.isPremium; }
+	get degradationReason() { return this.base.degradationReason; }
+	get multiplier() { return this.base.multiplier; }
+	get restrictedToSkus() { return this.base.restrictedToSkus; }
+	get isFallback() { return this.base.isFallback; }
+	get customModel() { return this.base.customModel; }
+	get isExtensionContributed() { return this.base.isExtensionContributed; }
+	get maxPromptImages() { return this.base.maxPromptImages; }
+
+	getExtraHeaders(location?: ChatLocation) { return this.base.getExtraHeaders?.(location) ?? {}; }
+	getEndpointFetchOptions(): IEndpointFetchOptions { return { suppressIntegrationId: true }; }
+	interceptBody(body: IEndpointBody | undefined) { return this.base.interceptBody?.(body); }
+	acquireTokenizer() { return this.base.acquireTokenizer(); }
+	createRequestBody(options: ICreateEndpointBodyOptions): IEndpointBody { return this.base.createRequestBody(options); }
+	processResponseFromChatEndpoint(...args: Parameters<IChatEndpoint['processResponseFromChatEndpoint']>) {
+		return this.base.processResponseFromChatEndpoint(...args);
+	}
+	makeChatRequest(...args: Parameters<IChatEndpoint['makeChatRequest']>): Promise<ChatResponse> {
+		return this.base.makeChatRequest(...args);
+	}
+
+	cloneWithTokenOverride(modelMaxPromptTokens: number): IChatEndpoint {
+		return this.instantiationService.createInstance(
+			CompactLlmOverrideEndpoint,
+			this.base.cloneWithTokenOverride(modelMaxPromptTokens),
+			this.compactLlmUrl,
+		);
+	}
+
+	async makeChatRequest2(options: IMakeChatRequestOptions, token: CancellationToken): Promise<ChatResponse> {
+		const requestId = generateUuid();
+		const normalizedBaseRaw = this.compactLlmUrl.replace(/\/+$/, '');
+		const normalizedV1Base = normalizedBaseRaw.endsWith('/v1') ? normalizedBaseRaw : `${normalizedBaseRaw}/v1`;
+		const compactUrl = `${normalizedV1Base}/chat/completions`;
+		const modelsUrl = `${normalizedV1Base}/models`;
+		// Sanitize messages for the local LLM:
+		// - Stringify array content (the CAPI format allows content arrays)
+		// - Strip CAPI-specific extra fields (copilot_references, copilot_cache_control, etc.)
+		// - Convert `tool` / `function` role messages to `user` messages
+		// - Strip tool_calls from assistant messages
+		type SimpleMessage = { role: string; content: string };
+		const sanitized: SimpleMessage[] = rawMessageToCAPI(options.messages).flatMap((msg): SimpleMessage[] => {
+			const text = getCAPITextPart(msg.content as string | Parameters<typeof getCAPITextPart>[0]);
+			switch (msg.role) {
+				case 'tool':
+				case 'function':
+					return [{ role: 'user', content: `[Tool result]\n${text}` }];
+				case 'system':
+				case 'user':
+				case 'assistant':
+					return [{ role: msg.role, content: text }];
+				default:
+					return text ? [{ role: 'user', content: text }] : [];
+			}
+		});
+		const systemMessages = sanitized.filter(m => m.role === 'system');
+		const nonSystemMessages = sanitized.filter(m => m.role !== 'system');
+		const mergedSystemPrompt = [
+			COMPACT_SYSTEM_PROMPT,
+			...systemMessages.map(m => m.content).filter(Boolean),
+		].join('\n\n');
+		const messages = [
+			{ role: 'system', content: mergedSystemPrompt },
+			...nonSystemMessages,
+		];
+		const maxLogChars = 1000;
+		const truncateForLog = (value: string): string => value.length > maxLogChars
+			? `${value.slice(0, maxLogChars)}...<truncated ${value.length - maxLogChars} chars>`
+			: value;
+		const beforeCompactText = nonSystemMessages
+			.map((m, i) => `${i + 1}. [${m.role}] ${m.content}`)
+			.join('\n');
+
+		const abort = this.fetcherService.makeAbortController();
+		const cancelListener = token.onCancellationRequested(() => abort.abort());
+		try {
+			const fail = (reason: string): ChatResponse => ({
+				type: ChatFetchResponseType.Failed,
+				reason,
+				requestId,
+				serverRequestId: undefined,
+			});
+
+			type ModelEntry = { id?: string; default?: boolean; is_default?: boolean; isDefault?: boolean };
+			type ModelsResponse = {
+				data?: ModelEntry[];
+				default_model?: string;
+				default?: string;
+				model?: string;
+			};
+			const modelsResponse = await this.fetcherService.fetch(modelsUrl, {
+				callSite: NO_FETCH_TELEMETRY,
+				method: 'GET',
+				signal: abort.signal,
+				useFetcher: 'node-http',
+			});
+			if (!modelsResponse.ok) {
+				this.logService.warn(`[mem0][compact] model discovery failed: ${modelsResponse.status} ${modelsResponse.statusText}, url=${modelsUrl}`);
+				return fail(`Model discovery HTTP ${modelsResponse.status}`);
+			}
+
+			const modelsData = await modelsResponse.json() as ModelsResponse;
+			const discoveredModelId = modelsData.default_model
+				?? modelsData.default
+				?? modelsData.model
+				?? modelsData.data?.find(m => m.default === true || m.is_default === true || m.isDefault === true)?.id
+				?? (modelsData.data?.length === 1 ? modelsData.data[0]?.id : undefined);
+
+			if (!discoveredModelId) {
+				this.logService.warn('[mem0][compact] request failed: unable to discover default model from /models');
+				return fail('Unable to discover default model');
+			}
+
+			this.logService.debug(`[mem0][compact] sending request: url=${compactUrl}, model=${discoveredModelId}`);
+			const requestStartMs = Date.now();
+			const response = await this.fetcherService.fetch(compactUrl, {
+				callSite: NO_FETCH_TELEMETRY,
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					model: discoveredModelId,
+					messages,
+					temperature: options.requestOptions?.temperature ?? 0,
+					chat_template_kwargs: { enable_thinking: false },
+					thinking: { type: 'disabled' },
+					stream: false,
+				}),
+				signal: abort.signal,
+				useFetcher: 'node-http',
+			});
+
+			if (token.isCancellationRequested) {
+				return { type: ChatFetchResponseType.Canceled, reason: 'canceled', requestId, serverRequestId: undefined };
+			}
+
+			if (!response.ok) {
+				this.logService.warn(`[mem0][compact] request failed: ${response.status} ${response.statusText}, url=${compactUrl}, model=${discoveredModelId}`);
+				return fail(`HTTP ${response.status}`);
+			}
+
+			const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+			const content = data.choices?.[0]?.message?.content ?? '';
+			const elapsedMs = Date.now() - requestStartMs;
+			const beforeChars = beforeCompactText.length;
+			const afterChars = content.length;
+			const reductionRatio = beforeChars > 0
+				? ((beforeChars - afterChars) / beforeChars)
+				: 0;
+			this.logService.info(
+				`[mem0][compact] success compare: url=${compactUrl}, model=${discoveredModelId}, elapsedMs=${elapsedMs}, beforeChars=${beforeChars}, afterChars=${afterChars}, reductionRatio=${reductionRatio.toFixed(4)}\n` +
+				`[before]\n${truncateForLog(beforeCompactText)}\n` +
+				`[after]\n${truncateForLog(content)}`
+			);
+			if (options.finishedCb) {
+				await options.finishedCb(content, 0, { text: content, copilotToolCalls: [] });
+			}
+
+			return {
+				type: ChatFetchResponseType.Success,
+				value: content,
+				requestId,
+				serverRequestId: undefined,
+				usage: data.usage
+					? {
+						prompt_tokens: data.usage.prompt_tokens ?? 0,
+						completion_tokens: data.usage.completion_tokens ?? 0,
+						total_tokens: (data.usage.prompt_tokens ?? 0) + (data.usage.completion_tokens ?? 0)
+					}
+					: undefined,
+				resolvedModel: discoveredModelId,
+			};
+		} catch (e) {
+			if (token.isCancellationRequested) {
+				return { type: ChatFetchResponseType.Canceled, reason: 'canceled', requestId, serverRequestId: undefined };
+			}
+
+			this.logService.warn(`[mem0][compact] request error: ${e}`);
+			return {
+				type: ChatFetchResponseType.Failed,
+				reason: String(e),
+				requestId,
+				serverRequestId: undefined,
+			};
+		} finally {
+			cancelListener.dispose();
 		}
 	}
 }
@@ -374,7 +607,6 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 		token: vscode.CancellationToken
 	): Promise<IBuildPromptResult> {
 		this._resolvedCustomizations = await PromptRegistry.resolveAllCustomizations(this.instantiationService, this.endpoint);
-		// Add any references from the codebase invocation to the request
 		const codebase = await this._getCodebaseReferences(promptContext, token);
 
 		let variables = promptContext.chatVariables;
@@ -392,7 +624,6 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 			throw new Error(`Setting github.copilot.${ConfigKey.Advanced.SummarizeAgentConversationHistoryThreshold.id} is too low`);
 		}
 
-		// Reserve extra space when tools are involved due to token counting issues
 		const baseBudget = Math.min(
 			this.configurationService.getConfig<number | undefined>(ConfigKey.Advanced.SummarizeAgentConversationHistoryThreshold) ?? this.endpoint.modelMaxPromptTokens,
 			this.endpoint.modelMaxPromptTokens
@@ -423,26 +654,20 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 			customizations: this._resolvedCustomizations
 		};
 
-		// ── Background compaction: dual-threshold approach ────────────────
+		// -- Background compaction: dual-threshold approach --
 		//
 		// Background compaction thresholds (checked post-render using the
 		// actual tokenCount from the current render):
 		//
-		//   Completed (previous bg pass)  → apply the summary before rendering.
-		//
-		//   ≥ 95% + InProgress             → block on the background compaction
-		//                                    completing, then apply before rendering.
-		//
-		//   ≥ 75% + Idle (post-render)     → kick off background compaction so
-		//                                    it is ready for a future iteration.
-		//
+		//   Completed (previous background pass) -> apply the summary before rendering.
+		//   >= 95% + InProgress                 -> block on background compaction, then apply.
+		//   >= 75% + Idle (post-render)         -> kick off background compaction.
+
 		const backgroundSummarizer = backgroundCompactionEnabled ? this._getOrCreateBackgroundSummarizer(promptContext.conversation?.sessionId) : undefined;
 		const contextRatio = backgroundSummarizer && budgetThreshold > 0
 			? this._lastRenderTokenCount / budgetThreshold
 			: 0;
 
-		// Track whether we applied a summary in this iteration so we don't
-		// immediately re-trigger background compaction in the post-render check.
 		let summaryAppliedThisIteration = false;
 
 		// 1. If a previous background pass completed, apply its summary now.
@@ -457,9 +682,8 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 				summaryAppliedThisIteration = true;
 			}
 		}
-
-		// 2. At ≥ 95% — block and wait for the in-progress compaction,
-		//    then apply the result before rendering.
+		// 2. At >= 95%: block and wait for in-progress compaction,
+		// then apply the result before rendering.
 		if (backgroundCompactionEnabled && backgroundSummarizer && contextRatio >= 0.95 && backgroundSummarizer.state === BackgroundSummarizationState.InProgress) {
 			this.logService.debug(`[Agent] context at ${(contextRatio * 100).toFixed(0)}% — blocking on background compaction`);
 			const summaryPromise = backgroundSummarizer.waitForCompletion();
