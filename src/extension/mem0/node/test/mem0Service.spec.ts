@@ -68,13 +68,14 @@ class MockFetcherService {
 }
 
 function makeMemory(overrides: Partial<Mem0Memory> & { memory: string }): Mem0Memory {
+	const { memory, ...rest } = overrides;
 	return {
-		id: overrides.id ?? 'mem-1',
-		memory: overrides.memory,
-		score: overrides.score ?? 0.9,
-		created_at: overrides.created_at ?? '2025-01-01T00:00:00Z',
-		updated_at: overrides.updated_at ?? '2025-01-01T00:00:00Z',
-		...overrides,
+		id: rest.id ?? 'mem-1',
+		memory,
+		score: rest.score ?? 0.9,
+		created_at: rest.created_at ?? '2025-01-01T00:00:00Z',
+		updated_at: rest.updated_at ?? '2025-01-01T00:00:00Z',
+		...rest,
 	};
 }
 
