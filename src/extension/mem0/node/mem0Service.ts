@@ -71,7 +71,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 
 				if (!response.ok) {
 					const elapsedMs = Date.now() - requestStartMs;
-					this.logService.warn(`[Mem0] search failed: ${response.status} ${response.statusText}, elapsedMs=${elapsedMs}`);
+					this.logService.warn(`[Mem0][${this.userId}] search failed: ${response.status} ${response.statusText}, elapsedMs=${elapsedMs}`);
 					return [];
 				}
 
@@ -80,14 +80,14 @@ export class Mem0Service extends Disposable implements IMem0Service {
 				const minScore = this.configurationService.getConfig(ConfigKey.Mem0MinRelevanceScore) ?? 0.5;
 				const filtered = results.filter(m => (m.score ?? 1) >= minScore);
 				const elapsedMs = Date.now() - requestStartMs;
-				this.logService.trace(`[Mem0] search OK: ${results.length} results, ${filtered.length} after filtering (minScore=${minScore}), elapsedMs=${elapsedMs}`);
+				this.logService.trace(`[Mem0][${this.userId}] search OK: ${results.length} results, ${filtered.length} after filtering (minScore=${minScore}), elapsedMs=${elapsedMs}`);
 				return filtered;
 			} finally {
 				clearTimeout(timer);
 			}
 		} catch (e) {
 			const elapsedMs = Date.now() - requestStartMs;
-			this.logService.warn(`[Mem0] search unavailable: ${e}, elapsedMs=${elapsedMs}`);
+			this.logService.warn(`[Mem0][${this.userId}] search unavailable: ${e}, elapsedMs=${elapsedMs}`);
 			return [];
 		}
 	}
@@ -117,20 +117,20 @@ export class Mem0Service extends Disposable implements IMem0Service {
 
 				if (!response.ok) {
 					const elapsedMs = Date.now() - requestStartMs;
-					this.logService.warn(`[Mem0] add failed: ${response.status} ${response.statusText}, elapsedMs=${elapsedMs}`);
+					this.logService.warn(`[Mem0][${this.userId}] add failed: ${response.status} ${response.statusText}, elapsedMs=${elapsedMs}`);
 					return undefined;
 				}
 
 				const addResult = await response.json() as Mem0AddResult;
 				const elapsedMs = Date.now() - requestStartMs;
-				this.logService.trace(`[Mem0] add OK: ${addResult.results?.length ?? 0} entries (${addResult.results?.map(r => r.event).join(', ')}), elapsedMs=${elapsedMs}`);
+				this.logService.trace(`[Mem0][${this.userId}] add OK: ${addResult.results?.length ?? 0} entries (${addResult.results?.map(r => r.event).join(', ')}), elapsedMs=${elapsedMs}`);
 				return addResult;
 			} finally {
 				clearTimeout(timer);
 			}
 		} catch (e) {
 			const elapsedMs = Date.now() - requestStartMs;
-			this.logService.warn(`[Mem0] add unavailable: ${e}, elapsedMs=${elapsedMs}`);
+			this.logService.warn(`[Mem0][${this.userId}] add unavailable: ${e}, elapsedMs=${elapsedMs}`);
 			return undefined;
 		}
 	}
@@ -154,21 +154,21 @@ export class Mem0Service extends Disposable implements IMem0Service {
 
 				if (!response.ok) {
 					const elapsedMs = Date.now() - requestStartMs;
-					this.logService.warn(`[Mem0] getAll failed: ${response.status} ${response.statusText}, elapsedMs=${elapsedMs}`);
+					this.logService.warn(`[Mem0][${this.userId}] getAll failed: ${response.status} ${response.statusText}, elapsedMs=${elapsedMs}`);
 					return [];
 				}
 
 				const data = await response.json() as { results: Mem0Memory[] };
 				const allResults = data.results ?? [];
 				const elapsedMs = Date.now() - requestStartMs;
-				this.logService.trace(`[Mem0] getAll OK: ${allResults.length} memories, elapsedMs=${elapsedMs}`);
+				this.logService.trace(`[Mem0][${this.userId}] getAll OK: ${allResults.length} memories, elapsedMs=${elapsedMs}`);
 				return allResults;
 			} finally {
 				clearTimeout(timer);
 			}
 		} catch (e) {
 			const elapsedMs = Date.now() - requestStartMs;
-			this.logService.warn(`[Mem0] getAll unavailable: ${e}, elapsedMs=${elapsedMs}`);
+			this.logService.warn(`[Mem0][${this.userId}] getAll unavailable: ${e}, elapsedMs=${elapsedMs}`);
 			return [];
 		}
 	}
@@ -199,7 +199,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 
 				if (!response.ok) {
 					const elapsedMs = Date.now() - requestStartMs;
-					this.logService.warn(`[Mem0] compress failed: ${response.status} ${response.statusText}, elapsedMs=${elapsedMs}`);
+					this.logService.warn(`[Mem0][${this.userId}] compress failed: ${response.status} ${response.statusText}, elapsedMs=${elapsedMs}`);
 					return text;
 				}
 
@@ -207,18 +207,18 @@ export class Mem0Service extends Disposable implements IMem0Service {
 				const compressed = data.compressed?.trim();
 				if (!compressed) {
 					const elapsedMs = Date.now() - requestStartMs;
-					this.logService.warn(`[Mem0] compress returned empty content, elapsedMs=${elapsedMs}`);
+					this.logService.warn(`[Mem0][${this.userId}] compress returned empty content, elapsedMs=${elapsedMs}`);
 					return text;
 				}
 				const elapsedMs = Date.now() - requestStartMs;
-				this.logService.trace(`[Mem0] compressed memory context: ${text.length} -> ${compressed.length} chars, elapsedMs=${elapsedMs}`);
+				this.logService.trace(`[Mem0][${this.userId}] compressed memory context: ${text.length} -> ${compressed.length} chars, elapsedMs=${elapsedMs}`);
 				return compressed;
 			} finally {
 				clearTimeout(timer);
 			}
 		} catch (e) {
 			const elapsedMs = Date.now() - requestStartMs;
-			this.logService.warn(`[Mem0] compress unavailable, using original text: ${e}, elapsedMs=${elapsedMs}`);
+			this.logService.warn(`[Mem0][${this.userId}] compress unavailable, using original text: ${e}, elapsedMs=${elapsedMs}`);
 			return text;
 		}
 	}

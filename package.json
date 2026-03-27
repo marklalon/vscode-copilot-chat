@@ -3266,8 +3266,8 @@
 					},
 					"github.copilot.chat.mem0.compress": {
 						"type": "boolean",
-						"default": false,
-						"markdownDescription": "Enable memory context compression to deduplicate and reduce token usage when recalled memories exceed the compress threshold. Compression is handled server-side by the mem0 service."
+						"default": true,
+						"markdownDescription": "Reserved for future mem0 compression integration. Compression is handled server-side by the mem0 service."
 					},
 					"github.copilot.chat.mem0.minRelevanceScore": {
 						"type": "number",
@@ -3275,12 +3275,6 @@
 						"minimum": 0,
 						"maximum": 1,
 						"markdownDescription": "Minimum relevance score (0–1) for mem0 memory recall. Memories below this threshold are filtered out."
-					},
-					"github.copilot.chat.mem0.compressThreshold": {
-						"type": "number",
-						"default": 2000,
-						"minimum": 0,
-						"markdownDescription": "Character length threshold for memory context compression. Compression is only triggered when the recalled memory text exceeds this length."
 					},
 					"github.copilot.chat.anthropic.thinking.forceExtendedThinking": {
 						"type": "boolean",

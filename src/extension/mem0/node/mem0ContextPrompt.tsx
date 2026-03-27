@@ -9,7 +9,7 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { Tag } from '../../prompts/node/base/tag';
 import { IMem0Service, Mem0Memory } from '../common/mem0Types';
 
-const MAX_MEM0_CONTEXT_TOKENS = 2000;
+const MAX_MEM0_CONTEXT_TOKENS = 1500;
 
 export interface Mem0ContextPromptProps extends BasePromptElementProps {
 	readonly query: string;
@@ -44,13 +44,7 @@ export class Mem0ContextPrompt extends PromptElement<Mem0ContextPromptProps> {
 
 		this.logService.trace(`[Mem0] Recalled ${memories.length} memories for query`);
 
-		let content = this.formatMemories(memories);
-
-		const compressEnabled = this.configurationService.getConfig(ConfigKey.Mem0CompressEnabled) ?? false;
-		const compressThreshold = this.configurationService.getConfig(ConfigKey.Mem0CompressThreshold) ?? 2000;
-		if (compressEnabled && content.length > compressThreshold) {
-			content = await this.mem0Service.compressContext(content);
-		}
+		const content = this.formatMemories(memories);
 
 		return (
 			<TokenLimit max={MAX_MEM0_CONTEXT_TOKENS}>

@@ -67,8 +67,7 @@ All settings are under `github.copilot.chat.mem0.*` in VS Code Settings (`Ctrl+,
 | `endpoint` | string | `http://127.0.0.1:8080` | mem0 REST API base URL |
 | `userId` | string | `""` | User ID for memory isolation (empty = machineId) |
 | `minRelevanceScore` | number | `0.5` | Minimum score to include a recalled memory |
-| `compressEnabled` | boolean | `false` | Enable dedup/compression of recalled memory context via mem0 `/compress` |
-| `compressThreshold` | number | `2000` | Character count threshold to trigger compression |
+| `compressEnabled` | boolean | `true` | Reserved for future use (current prompt path does not invoke compression) |
 
 ## mem0 API Endpoints
 
@@ -92,23 +91,26 @@ The self-hosted mem0 Docker uses these paths (**no `/v1/` prefix**):
    - Set `github.copilot.chat.mem0.enabled` to `true`
    - Set `github.copilot.chat.mem0.endpoint` to your mem0 URL
 
-3. (Optional) **Compression** — deduplicate recalled memories before injecting into prompt:
-   - Set `compressEnabled` to `true`
-   - Compression is handled server-side by the mem0 service (`POST /compress`) using its own configured LLM — no extra client-side LLM configuration needed
+3. **Compression status**:
+   - The current mem0 prompt injection path does not invoke compression.
+   - Compression settings and tests are kept for future integration work.
 
 ## Logging
 
-All logs use `[Mem0]` prefix. View in: Output panel → GitHub Copilot Chat.
+All logs use `[Mem0][userId]` prefix. View in: Output panel → GitHub Copilot Chat.
 
 | Level | Message | When |
 |-------|---------|------|
-| trace | `search OK: N results, M after filtering` | Successful search |
-| trace | `add OK: N entries (ADD, UPDATE, ...)` | Successful write-back |
-| trace | `getAll OK: N memories` | Successful getAll |
-| trace | `compressed memory context: X -> Y chars` | Successful compression |
+| trace | `[Mem0][userId] search OK: N results, M after filtering` | Successful search |
+| trace | `[Mem0][userId] add OK: N entries (ADD, UPDATE, ...)` | Successful write-back |
+| trace | `[Mem0][userId] getAll OK: N memories` | Successful getAll |
 | trace | `Recalled N memories for query` | Prompt component found results |
-| warn | `search failed: 404 Not Found` | HTTP error |
-| warn | `add unavailable: AbortError` | Timeout or network error |
+| warn | `[Mem0][userId] search failed: 404 Not Found` | HTTP error |
+| warn | `[Mem0][userId] search unavailable: AbortError` | Timeout or network error |
+| warn | `[Mem0][userId] add failed: 404 Not Found` | HTTP error |
+| warn | `[Mem0][userId] add unavailable: AbortError` | Timeout or network error |
+| warn | `[Mem0][userId] getAll failed: 404 Not Found` | HTTP error |
+| warn | `[Mem0][userId] getAll unavailable: AbortError` | Timeout or network error |
 
 Set log level to **Trace** to see success logs: `Ctrl+Shift+P` → `Developer: Set Log Level` → `Trace`.
 
