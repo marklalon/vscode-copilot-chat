@@ -1,15 +1,49 @@
 # ============================================================================
 # Test mem0 compressContext: quality + performance benchmark
 # Purpose: Evaluate compression latency, ratio, and quality on varied text types
+# Direct LLM mode: bypasses mem0, calls LLM /chat/completions directly
 # ============================================================================
 
 param(
-	[string]$Mem0Url = "http://127.0.0.1:18000",
+	[string]$LlmUrl = "http://127.0.0.1:18081/v1",
+	[string]$Model = "Qwen3.5-9B-NVFP4",
 	[int]$Repeats = 1,
-	[int]$TimeoutSec = 90
+	[int]$TimeoutSec = 90,
+	[int]$MaxTokens = 1024
 )
 
 $ErrorActionPreference = "Stop"
+
+$systemPrompt = @"
+You are a memory context compressor for an AI coding assistant. Your job is to intelligently consolidate recalled long-term memory entries into a structured, useful summary.
+
+## Output Format
+
+Produce exactly two sections:
+
+### CONTEXT
+A numbered list of retained facts — one per line, no commentary.
+Include: architectural decisions and rationale, debugging conclusions, compatibility constraints, workarounds, config keys, env var names, model names, version numbers, service names, error messages (verbatim).
+Exclude: temporary state, in-progress tasks, one-off debugging steps that led nowhere, duplicate facts.
+
+### APPENDIX
+A flat list of important references discovered during past conversations. Each entry is a single line:
+- ``[path]`` — brief note on what it is / why it matters
+- ``[url]`` — brief note on what it is / why it matters
+
+Include only references that have proven useful or are likely to be needed again. Omit: temp files, auto-generated output paths, one-time URLs, anything clearly expired or superseded.
+
+## Rules
+
+1. Merge entries that are identical in meaning; keep the most detailed version.
+2. When two entries cover the same topic with different specifics, merge non-conflicting parts and retain all distinct specifics.
+3. **Selection over preservation**: do NOT blindly keep all paths/URLs — evaluate whether each reference is worth carrying forward.
+4. Reproduce retained paths and URLs character-for-character exactly as they appear in input.
+5. Record error experiences: if an entry describes a mistake, failed approach, or a correction that succeeded, keep it — these are high-value. Label with ``[ERROR]`` or ``[FIX]`` prefix if helpful.
+6. Do NOT invent or infer new information. Only reorganize what is given.
+7. Maintain the original language of each entry (**do not translate**). Treat bilingual duplicates as duplicates: if two entries express the same fact in different languages, keep only one — prefer the more detailed version, or the language it was originally written in.
+8. Output ONLY the two sections above, nothing else.
+"@
 
 $codeNoise = @"
 function fetchUsers() {
@@ -122,6 +156,21 @@ function Test-IsNumberedList {
 	return $numberedLines.Count -gt 0
 }
 
+function Get-ContextSection {
+	param([string]$Text)
+
+	if ([string]::IsNullOrWhiteSpace($Text)) {
+		return ""
+	}
+
+	# Extract text between ### CONTEXT and ### APPENDIX (or end of string)
+	if ($Text -match "(?s)###\s*CONTEXT\s*\r?\n(.+?)(?=###\s*APPENDIX|$)") {
+		return $Matches[1].Trim()
+	}
+
+	return $Text
+}
+
 function Evaluate-CompressionQuality {
 	param(
 		[hashtable]$Case,
@@ -190,64 +239,83 @@ function Invoke-CompressCase {
 	$inputText = [string]$Case.Input
 	$inputChars = $inputText.Length
 
-	$payload = @{ text = $inputText } | ConvertTo-Json -Depth 2
+	$body = @{
+		model       = $Model
+		temperature = 0
+		max_tokens  = $MaxTokens
+		messages    = @(
+			@{ role = "system"; content = $systemPrompt },
+			@{ role = "user"; content = $inputText }
+		)
+	}
+
+	$payload = $body | ConvertTo-Json -Depth 8
 	$payloadBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
 	$sw = [System.Diagnostics.Stopwatch]::StartNew()
 
 	try {
-		$resp = Invoke-WebRequest -Uri "$BaseUrl/compress" -Method POST -ContentType "application/json" -Body $payloadBytes -TimeoutSec $Timeout
+		$resp = Invoke-WebRequest -Uri "$BaseUrl/chat/completions" -Method POST -ContentType "application/json" -Body $payloadBytes -TimeoutSec $Timeout
 		$sw.Stop()
 
 		$obj = $resp.Content | ConvertFrom-Json
-		$outputText = [string]$obj.compressed
+		$fullText = [string]$obj.choices[0].message.content
+		$usage = $obj.usage
+
+		$outputText = Get-ContextSection -Text $fullText
 		$outputChars = $outputText.Length
 		$ratio = if ($inputChars -gt 0) { [math]::Round($outputChars / [double]$inputChars, 4) } else { 0 }
 		$savingsRate = if ($inputChars -gt 0) { [math]::Round((1 - ($outputChars / [double]$inputChars)) * 100, 2) } else { 0 }
 		$quality = Evaluate-CompressionQuality -Case $Case -Output $outputText -Ratio $ratio -Ok $true
 
 		return [PSCustomObject]@{
-			label = $Case.Label
-			ok = $true
-			status = [int]$resp.StatusCode
-			ms = [int]$sw.ElapsedMilliseconds
-			inputChars = [int]$inputChars
-			outputChars = [int]$outputChars
-			ratio = [double]$ratio
-			savingsRate = [double]$savingsRate
-			isNumbered = [bool](Test-IsNumberedList -Text $outputText)
-			qualityScore = [int]$quality.score
-			qualityPass = [bool]$quality.pass
-			qualityReason = [string]$quality.reason
-			preview = if ($outputText.Length -gt 220) { $outputText.Substring(0, 220) + "..." } else { $outputText }
-			error = ""
+			label           = $Case.Label
+			ok              = $true
+			status          = [int]$resp.StatusCode
+			ms              = [int]$sw.ElapsedMilliseconds
+			inputChars      = [int]$inputChars
+			outputChars     = [int]$outputChars
+			ratio           = [double]$ratio
+			savingsRate     = [double]$savingsRate
+			promptTokens    = [int]($usage.prompt_tokens)
+			completionTokens = [int]($usage.completion_tokens)
+			isNumbered      = [bool](Test-IsNumberedList -Text $outputText)
+			qualityScore    = [int]$quality.score
+			qualityPass     = [bool]$quality.pass
+			qualityReason   = [string]$quality.reason
+			preview         = if ($outputText.Length -gt 220) { $outputText.Substring(0, 220) + "..." } else { $outputText }
+			error           = ""
 		}
 	} catch {
 		$sw.Stop()
 		$quality = Evaluate-CompressionQuality -Case $Case -Output "" -Ratio 1 -Ok $false
 
 		return [PSCustomObject]@{
-			label = $Case.Label
-			ok = $false
-			status = 0
-			ms = [int]$sw.ElapsedMilliseconds
-			inputChars = [int]$inputChars
-			outputChars = 0
-			ratio = 1.0
-			savingsRate = 0
-			isNumbered = $false
-			qualityScore = [int]$quality.score
-			qualityPass = [bool]$quality.pass
-			qualityReason = [string]$quality.reason
-			preview = ""
-			error = [string]$_.Exception.Message
+			label           = $Case.Label
+			ok              = $false
+			status          = 0
+			ms              = [int]$sw.ElapsedMilliseconds
+			inputChars      = [int]$inputChars
+			outputChars     = 0
+			ratio           = 1.0
+			savingsRate     = 0
+			promptTokens    = 0
+			completionTokens = 0
+			isNumbered      = $false
+			qualityScore    = [int]$quality.score
+			qualityPass     = [bool]$quality.pass
+			qualityReason   = [string]$quality.reason
+			preview         = ""
+			error           = [string]$_.Exception.Message
 		}
 	}
 }
 
-Write-Host "`n=== mem0 compressContext Benchmark ===" -ForegroundColor Cyan
-Write-Host "Mem0Url     : $Mem0Url"
+Write-Host "`n=== mem0 compressContext Benchmark (Direct LLM) ===" -ForegroundColor Cyan
+Write-Host "LlmUrl      : $LlmUrl"
+Write-Host "Model       : $Model"
 Write-Host "Repeats     : $Repeats"
 Write-Host "TimeoutSec  : $TimeoutSec"
+Write-Host "MaxTokens   : $MaxTokens"
 
 $all = @()
 
@@ -256,11 +324,11 @@ for ($round = 1; $round -le $Repeats; $round++) {
 
 	foreach ($case in $cases) {
 		Write-Host "Running case: $($case.Label)"
-		$res = Invoke-CompressCase -Case $case -BaseUrl $Mem0Url -Timeout $TimeoutSec
+		$res = Invoke-CompressCase -Case $case -BaseUrl $LlmUrl -Timeout $TimeoutSec
 		$all += $res
 
 		if ($res.ok) {
-			Write-Host ("  ok ms={0} ratio={1:P1} savings={2}% quality={3} pass={4}" -f $res.ms, $res.ratio, $res.savingsRate, $res.qualityScore, $res.qualityPass) -ForegroundColor Green
+			Write-Host ("  ok ms={0} ratio={1:P1} savings={2}% quality={3} pass={4} tokens={5}+{6}" -f $res.ms, $res.ratio, $res.savingsRate, $res.qualityScore, $res.qualityPass, $res.promptTokens, $res.completionTokens) -ForegroundColor Green
 		} else {
 			Write-Host ("  err ms={0} msg={1}" -f $res.ms, $res.error) -ForegroundColor Red
 		}
@@ -292,20 +360,20 @@ $byCase = $all | Group-Object label | ForEach-Object {
 	$qualityPassCount = ($g | Where-Object { $_.qualityPass }).Count
 
 	[PSCustomObject]@{
-		case = $_.Name
-		samples = $sampleCount
-		successRate = "{0:P0}" -f ($successCount / [double][Math]::Max(1, $sampleCount))
+		case            = $_.Name
+		samples         = $sampleCount
+		successRate     = "{0:P0}" -f ($successCount / [double][Math]::Max(1, $sampleCount))
 		qualityPassRate = "{0:P0}" -f ($qualityPassCount / [double][Math]::Max(1, $sampleCount))
-		avgMs = [int](($g | Measure-Object ms -Average).Average)
-		avgRatio = [double](($g | Measure-Object ratio -Average).Average)
-		avgSavings = [double](($g | Measure-Object savingsRate -Average).Average)
-		avgQuality = [int](($g | Measure-Object qualityScore -Average).Average)
+		avgMs           = [int](($g | Measure-Object ms -Average).Average)
+		avgRatio        = [double](($g | Measure-Object ratio -Average).Average)
+		avgSavings      = [double](($g | Measure-Object savingsRate -Average).Average)
+		avgQuality      = [int](($g | Measure-Object qualityScore -Average).Average)
 	}
 }
 $byCase | Sort-Object case | Format-Table -AutoSize
 
 Write-Host "`n=== Per-case Detail ===" -ForegroundColor Cyan
-$all | Select-Object label, ms, inputChars, outputChars, ratio, savingsRate, qualityScore, qualityPass, isNumbered | Format-Table -AutoSize
+$all | Select-Object label, ms, inputChars, outputChars, ratio, savingsRate, qualityScore, qualityPass, isNumbered, promptTokens, completionTokens | Format-Table -AutoSize
 
 Write-Host "`n=== Output Previews ===" -ForegroundColor Cyan
 $all | Select-Object label, preview, qualityReason | Format-List

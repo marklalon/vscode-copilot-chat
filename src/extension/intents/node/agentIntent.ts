@@ -434,9 +434,8 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 			{ role: 'system', content: compactSystemPrompt },
 			...nonSystemMessages,
 		];
-		const maxLogChars = 1000;
-		const truncateForLog = (value: string): string => value.length > maxLogChars
-			? `${value.slice(0, maxLogChars)}...<truncated ${value.length - maxLogChars} chars>`
+		const truncateForLog = (value: string, max = 1000): string => value.length > max
+			? `${value.slice(0, max)}...<truncated ${value.length - max} chars>`
 			: value;
 		const beforeCompactText = nonSystemMessages
 			.map((m, i) => `${i + 1}. [${m.role}] ${m.content}`)
@@ -519,7 +518,10 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 			}
 
 			const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
-			const content = data.choices?.[0]?.message?.content ?? '';
+			const rawContent = data.choices?.[0]?.message?.content ?? '';
+			// Strip thinking/reasoning blocks that some local LLMs emit despite being asked not to.
+			// Handles <think>...</think>, <thinking>...</thinking>, and <reasoning>...</reasoning>.
+			const content = rawContent.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, '').trim();
 			const elapsedMs = Date.now() - requestStartMs;
 			const beforeChars = beforeCompactText.length;
 			const afterChars = content.length;
@@ -529,7 +531,7 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 			if (this.traceEnabled) {
 				this.logService.info(
 					`[mem0][compact] success compare: url=${compactUrl}, model=${discoveredModelId}, elapsedMs=${elapsedMs}, beforeChars=${beforeChars}, afterChars=${afterChars}, reductionRatio=${reductionRatio.toFixed(4)}\n` +
-					`[prompt]\n${truncateForLog(compactSystemPrompt)}\n` +
+					`[prompt]\n${truncateForLog(compactSystemPrompt, 100)}\n` +
 					`[before]\n${truncateForLog(beforeCompactText)}\n` +
 					`[after]\n${truncateForLog(content)}`
 				);

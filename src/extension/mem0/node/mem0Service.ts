@@ -191,8 +191,9 @@ export class Mem0Service extends Disposable implements IMem0Service {
 				const addResult = await response.json() as Mem0AddResult;
 				const elapsedMs = Date.now() - requestStartMs;
 				if (this.traceEnabled) {
-					const entrySummary = addResult.results?.map(r => `[${r.event}] ${truncate(r.memory, 120)}`).join(', ') ?? '';
-					this.logService.trace(`[Mem0][${userId}] add OK: ${addResult.results?.length ?? 0} entries (${entrySummary}), elapsedMs=${elapsedMs}`);
+					const events = addResult.results?.map(r => r.event).join(', ') ?? '';
+					const memoryLines = addResult.results?.map(r => truncate(r.memory, 120)).join('\n') ?? '';
+					this.logService.trace(`[Mem0][${userId}] add OK: ${addResult.results?.length ?? 0} entries (${events}), elapsedMs=${elapsedMs}\n${memoryLines}`);
 				}
 				return addResult;
 			} finally {

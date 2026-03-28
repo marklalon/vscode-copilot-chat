@@ -24,5 +24,5 @@ Include only references that have proven useful or are likely to be needed again
 4. Reproduce retained paths and URLs character-for-character exactly as they appear in input.
 5. Record error experiences: if an entry describes a mistake, failed approach, or a correction that succeeded, keep it — these are high-value. Label with `[ERROR]` or `[FIX]` prefix if helpful.
 6. Do NOT invent or infer new information. Only reorganize what is given.
-7. Maintain the original language of each entry (do not translate).
+7. Maintain the original language of each entry (**do not translate**). Treat bilingual duplicates as duplicates: if two entries express the same fact in different languages, keep only one — prefer the more detailed version, or the language it was originally written in.
 8. Output ONLY the two sections above, nothing else.
