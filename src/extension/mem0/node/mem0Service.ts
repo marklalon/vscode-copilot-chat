@@ -12,6 +12,7 @@ import { VSBuffer } from '../../../util/vs/base/common/buffer';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { URI } from '../../../util/vs/base/common/uri';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
+import { truncate } from '../../../util/vs/base/common/strings';
 import { IMem0Service, Mem0AddResult, Mem0Memory } from '../common/mem0Types';
 
 const DEFAULT_SEARCH_LIMIT = 10;
@@ -189,7 +190,10 @@ export class Mem0Service extends Disposable implements IMem0Service {
 
 				const addResult = await response.json() as Mem0AddResult;
 				const elapsedMs = Date.now() - requestStartMs;
-				if (this.traceEnabled) { this.logService.trace(`[Mem0][${userId}] add OK: ${addResult.results?.length ?? 0} entries (${addResult.results?.map(r => r.event).join(', ')}), elapsedMs=${elapsedMs}`); }
+				if (this.traceEnabled) {
+					const entrySummary = addResult.results?.map(r => `[${r.event}] ${truncate(r.memory, 120)}`).join(', ') ?? '';
+					this.logService.trace(`[Mem0][${userId}] add OK: ${addResult.results?.length ?? 0} entries (${entrySummary}), elapsedMs=${elapsedMs}`);
+				}
 				return addResult;
 			} finally {
 				clearTimeout(timer);
