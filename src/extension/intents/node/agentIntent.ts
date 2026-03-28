@@ -346,7 +346,12 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 		@IFetcherService private readonly fetcherService: IFetcherService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ILogService private readonly logService: ILogService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) { }
+
+	private get traceEnabled(): boolean {
+		return this.configurationService.getConfig(ConfigKey.Mem0TraceLog) ?? false;
+	}
 
 	get urlOrRequestMetadata() { return this.base.urlOrRequestMetadata; }
 	get name() { return this.base.name; }
@@ -439,14 +444,23 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 
 		const abort = this.fetcherService.makeAbortController();
 		const cancelListener = token.onCancellationRequested(() => abort.abort());
+		const fail = async (reason: string): Promise<ChatResponse> => {
+			this.logService.warn(`[mem0][compact] ${reason}, falling back to default endpoint`);
+			try {
+				const baseResponse = await this.base.makeChatRequest2(options, token);
+				if (this.traceEnabled) { this.logService.info(`[mem0][compact] fallback to base endpoint succeeded`); }
+				return baseResponse;
+			} catch (fallbackError) {
+				this.logService.error(`[mem0][compact] fallback also failed: ${fallbackError}`);
+				return {
+					type: ChatFetchResponseType.Failed,
+					reason: `${reason}; Fallback error: ${fallbackError}`,
+					requestId,
+					serverRequestId: undefined,
+				};
+			}
+		};
 		try {
-			const fail = (reason: string): ChatResponse => ({
-				type: ChatFetchResponseType.Failed,
-				reason,
-				requestId,
-				serverRequestId: undefined,
-			});
-
 			type ModelEntry = { id?: string; default?: boolean; is_default?: boolean; isDefault?: boolean };
 			type ModelsResponse = {
 				data?: ModelEntry[];
@@ -462,7 +476,7 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 			});
 			if (!modelsResponse.ok) {
 				this.logService.warn(`[mem0][compact] model discovery failed: ${modelsResponse.status} ${modelsResponse.statusText}, url=${modelsUrl}`);
-				return fail(`Model discovery HTTP ${modelsResponse.status}`);
+				return await fail(`Model discovery HTTP ${modelsResponse.status}`);
 			}
 
 			const modelsData = await modelsResponse.json() as ModelsResponse;
@@ -474,10 +488,10 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 
 			if (!discoveredModelId) {
 				this.logService.warn('[mem0][compact] request failed: unable to discover default model from /models');
-				return fail('Unable to discover default model');
+				return await fail('Unable to discover default model');
 			}
 
-			this.logService.debug(`[mem0][compact] sending request: url=${compactUrl}, model=${discoveredModelId}`);
+			if (this.traceEnabled) { this.logService.debug(`[mem0][compact] sending request: url=${compactUrl}, model=${discoveredModelId}`); }
 			const requestStartMs = Date.now();
 			const response = await this.fetcherService.fetch(compactUrl, {
 				callSite: NO_FETCH_TELEMETRY,
@@ -501,7 +515,7 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 
 			if (!response.ok) {
 				this.logService.warn(`[mem0][compact] request failed: ${response.status} ${response.statusText}, url=${compactUrl}, model=${discoveredModelId}`);
-				return fail(`HTTP ${response.status}`);
+				return await fail(`HTTP ${response.status}`);
 			}
 
 			const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
@@ -512,12 +526,14 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 			const reductionRatio = beforeChars > 0
 				? ((beforeChars - afterChars) / beforeChars)
 				: 0;
-			this.logService.info(
-				`[mem0][compact] success compare: url=${compactUrl}, model=${discoveredModelId}, elapsedMs=${elapsedMs}, beforeChars=${beforeChars}, afterChars=${afterChars}, reductionRatio=${reductionRatio.toFixed(4)}\n` +
-				`[prompt]\n${truncateForLog(compactSystemPrompt)}\n` +
-				`[before]\n${truncateForLog(beforeCompactText)}\n` +
-				`[after]\n${truncateForLog(content)}`
-			);
+			if (this.traceEnabled) {
+				this.logService.info(
+					`[mem0][compact] success compare: url=${compactUrl}, model=${discoveredModelId}, elapsedMs=${elapsedMs}, beforeChars=${beforeChars}, afterChars=${afterChars}, reductionRatio=${reductionRatio.toFixed(4)}\n` +
+					`[prompt]\n${truncateForLog(compactSystemPrompt)}\n` +
+					`[before]\n${truncateForLog(beforeCompactText)}\n` +
+					`[after]\n${truncateForLog(content)}`
+				);
+			}
 			if (options.finishedCb) {
 				await options.finishedCb(content, 0, { text: content, copilotToolCalls: [] });
 			}
@@ -541,13 +557,7 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 				return { type: ChatFetchResponseType.Canceled, reason: 'canceled', requestId, serverRequestId: undefined };
 			}
 
-			this.logService.warn(`[mem0][compact] request error: ${e}`);
-			return {
-				type: ChatFetchResponseType.Failed,
-				reason: String(e),
-				requestId,
-				serverRequestId: undefined,
-			};
+			return await fail(`local LLM error: ${e}`);
 		} finally {
 			cancelListener.dispose();
 		}

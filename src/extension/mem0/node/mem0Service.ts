@@ -48,6 +48,10 @@ export class Mem0Service extends Disposable implements IMem0Service {
 		return this.configurationService.getConfig(ConfigKey.Mem0Enabled) ?? false;
 	}
 
+	private get traceEnabled(): boolean {
+		return this.configurationService.getConfig(ConfigKey.Mem0TraceLog) ?? false;
+	}
+
 	private getProjectConfigUri(): URI | undefined {
 		const workspaceFolder = this.workspaceService.getWorkspaceFolders()[0];
 		if (!workspaceFolder) {
@@ -140,7 +144,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 				const minScore = this.configurationService.getConfig(ConfigKey.Mem0MinRelevanceScore) ?? 0.5;
 				const filtered = results.filter(m => (m.score ?? 1) >= minScore);
 				const elapsedMs = Date.now() - requestStartMs;
-				this.logService.trace(`[Mem0][${userId}] search OK: ${results.length} results, ${filtered.length} after filtering (minScore=${minScore}), elapsedMs=${elapsedMs}`);
+				if (this.traceEnabled) { this.logService.trace(`[Mem0][${userId}] search OK: ${results.length} results, ${filtered.length} after filtering (minScore=${minScore}), elapsedMs=${elapsedMs}`); }
 				return filtered;
 			} finally {
 				clearTimeout(timer);
@@ -185,7 +189,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 
 				const addResult = await response.json() as Mem0AddResult;
 				const elapsedMs = Date.now() - requestStartMs;
-				this.logService.trace(`[Mem0][${userId}] add OK: ${addResult.results?.length ?? 0} entries (${addResult.results?.map(r => r.event).join(', ')}), elapsedMs=${elapsedMs}`);
+				if (this.traceEnabled) { this.logService.trace(`[Mem0][${userId}] add OK: ${addResult.results?.length ?? 0} entries (${addResult.results?.map(r => r.event).join(', ')}), elapsedMs=${elapsedMs}`); }
 				return addResult;
 			} finally {
 				clearTimeout(timer);
@@ -225,7 +229,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 				const data = await response.json() as { results: Mem0Memory[] };
 				const allResults = data.results ?? [];
 				const elapsedMs = Date.now() - requestStartMs;
-				this.logService.trace(`[Mem0][${userId}] getAll OK: ${allResults.length} memories, elapsedMs=${elapsedMs}`);
+				if (this.traceEnabled) { this.logService.trace(`[Mem0][${userId}] getAll OK: ${allResults.length} memories, elapsedMs=${elapsedMs}`); }
 				return allResults;
 			} finally {
 				clearTimeout(timer);

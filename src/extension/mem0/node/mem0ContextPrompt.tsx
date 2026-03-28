@@ -42,7 +42,7 @@ export class Mem0ContextPrompt extends PromptElement<Mem0ContextPromptProps> {
 			return null;
 		}
 
-		this.logService.trace(`[Mem0] Recalled ${memories.length} memories for query`);
+		if (this.configurationService.getConfig(ConfigKey.Mem0TraceLog)) { this.logService.trace(`[Mem0] Recalled ${memories.length} memories for query`); }
 
 		const content = this.formatMemories(memories);
 

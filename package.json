@@ -3271,6 +3271,11 @@
             "maximum": 1,
             "markdownDescription": "Minimum relevance score (0–1) for mem0 memory recall. Memories below this threshold are filtered out."
           },
+          "github.copilot.chat.mem0.traceLog": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Enable verbose trace logging for mem0 operations (search, add, compact). Useful for debugging."
+          },
           "github.copilot.chat.anthropic.thinking.forceExtendedThinking": {
             "type": "boolean",
             "markdownDescription": "%github.copilot.config.anthropic.thinking.forceExtendedThinking%",

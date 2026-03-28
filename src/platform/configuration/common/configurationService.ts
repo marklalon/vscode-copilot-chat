@@ -994,6 +994,7 @@ export namespace ConfigKey {
 	export const Mem0Endpoint = defineSetting<string>('chat.mem0.endpoint', ConfigType.Simple, 'http://127.0.0.1:8080');
 	export const Mem0MinRelevanceScore = defineSetting<number>('chat.mem0.minRelevanceScore', ConfigType.Simple, 0.5);
 	export const CompactLlmEndpoint = defineSetting<string>('chat.mem0.compactLlmEndpoint', ConfigType.Simple, '');
+	export const Mem0TraceLog = defineSetting<boolean>('chat.mem0.traceLog', ConfigType.Simple, false);
 }
 
 export function getAllConfigKeys(): string[] {
