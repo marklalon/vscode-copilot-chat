@@ -6,6 +6,7 @@
 import { BasePromptElementProps, PromptElement, PromptSizing, TokenLimit } from '@vscode/prompt-tsx';
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { ILogService } from '../../../platform/log/common/logService';
+import { truncate } from '../../../util/vs/base/common/strings';
 import { Tag } from '../../prompts/node/base/tag';
 import { IMem0Service, Mem0Memory } from '../common/mem0Types';
 
@@ -45,9 +46,9 @@ export class Mem0ContextPrompt extends PromptElement<Mem0ContextPromptProps> {
 		if (this.configurationService.getConfig(ConfigKey.Mem0TraceLog)) {
 			const memorySummary = memories.map((m, i) => {
 				const score = m.score !== undefined ? ` (score=${m.score.toFixed(2)})` : '';
-				return `  ${i + 1}. ${m.memory}${score}`;
+				return `  ${i + 1}. ${truncate(m.memory, 120)}${score}`;
 			}).join('\n');
-			this.logService.trace(`[Mem0] Recalled ${memories.length} memories for query "${this.props.query}":\n${memorySummary}`);
+			this.logService.trace(`[Mem0] Recalled ${memories.length} memories for query "${truncate(this.props.query, 80)}":\n${memorySummary}`);
 		}
 
 		const content = this.formatMemories(memories);
