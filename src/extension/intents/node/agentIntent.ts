@@ -6,6 +6,8 @@
 import * as l10n from '@vscode/l10n';
 import { Raw, RenderPromptResult } from '@vscode/prompt-tsx';
 import { BudgetExceededError } from '@vscode/prompt-tsx/dist/base/materialized';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import type * as vscode from 'vscode';
 import { IChatSessionService } from '../../../platform/chat/common/chatSessionService';
 import { ChatFetchResponseType, ChatLocation, ChatResponse } from '../../../platform/chat/common/commonTypes';
@@ -68,18 +70,11 @@ function isResponsesCompactionContextManagementEnabled(endpoint: IChatEndpoint, 
 		&& !modelsWithoutResponsesContextManagement.has(endpoint.family);
 }
 
-const COMPACT_SYSTEM_PROMPT = `You are a memory context compressor for an AI coding assistant. Your task is to deduplicate and lightly consolidate a list of recalled long-term memory entries while retaining all distinct and useful information.
-Rules:
-1. Only merge entries that are truly identical in meaning; when in doubt, keep them separate.
-2. Remove exact duplicates, keeping the most detailed version.
-3. NEVER drop or shorten specific technical values: error messages, config keys, environment variable names, model names, version numbers, parameter names, service names.
-4. NEVER truncate, abbreviate, or paraphrase any file path (absolute or relative, any OS convention), directory path, or URL — reproduce them character-for-character exactly as they appear in the input. This includes paths to user-attached files, workspace files, configuration files, and any HTTP/HTTPS/file/custom-scheme URLs.
-5. Preserve all distinct insights: root causes, workarounds, compatibility constraints, architectural decisions and their rationale, debugging conclusions.
-6. If two entries cover the same topic but contain different technical specifics (including different paths or URLs), keep both or merge only the non-conflicting parts, retaining all specifics.
-7. Keep the output as a numbered list - one fact per line, no commentary.
-8. Do NOT invent or infer new information. Only reorganize what is given.
-9. Maintain the original language of each entry (do not translate).
-10. Output ONLY the compressed list, nothing else.`;
+const COMPACT_SYSTEM_PROMPT_PATH = path.join(__dirname, '../assets/prompts/compactSystemPrompt.md');
+
+async function readCompactSystemPrompt(): Promise<string> {
+	return fs.readFile(COMPACT_SYSTEM_PROMPT_PATH, 'utf-8');
+}
 
 export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.ChatRequest) => {
 	const toolsService = accessor.get<IToolsService>(IToolsService);
@@ -258,7 +253,8 @@ export class AgentIntent extends EditCodeIntent {
 			return {};
 		}
 
-		const compactLlmUrl = this.configurationService.getConfig(ConfigKey.CompactLlmEndpoint)?.trim();
+		const mem0Enabled = this.configurationService.getConfig(ConfigKey.Mem0Enabled) ?? false;
+		const compactLlmUrl = mem0Enabled ? this.configurationService.getConfig(ConfigKey.CompactLlmEndpoint)?.trim() : undefined;
 		const compactEndpoint = compactLlmUrl
 			? this.instantiationService.createInstance(CompactLlmOverrideEndpoint, endpoint, compactLlmUrl)
 			: endpoint;
@@ -312,6 +308,7 @@ export class AgentIntent extends EditCodeIntent {
 			this._automodeService.invalidateRouterCache(request);
 
 			const chatResult: vscode.ChatResult = {
+				...(compactLlmUrl ? { details: 'Smart Compact' } : {}),
 				metadata: {
 					summary: {
 						toolCallRoundId: summaryMetadata.toolCallRoundId,
@@ -426,14 +423,10 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 					return text ? [{ role: 'user', content: text }] : [];
 			}
 		});
-		const systemMessages = sanitized.filter(m => m.role === 'system');
 		const nonSystemMessages = sanitized.filter(m => m.role !== 'system');
-		const mergedSystemPrompt = [
-			COMPACT_SYSTEM_PROMPT,
-			...systemMessages.map(m => m.content).filter(Boolean),
-		].join('\n\n');
+		const compactSystemPrompt = await readCompactSystemPrompt();
 		const messages = [
-			{ role: 'system', content: mergedSystemPrompt },
+			{ role: 'system', content: compactSystemPrompt },
 			...nonSystemMessages,
 		];
 		const maxLogChars = 1000;
@@ -521,6 +514,7 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 				: 0;
 			this.logService.info(
 				`[mem0][compact] success compare: url=${compactUrl}, model=${discoveredModelId}, elapsedMs=${elapsedMs}, beforeChars=${beforeChars}, afterChars=${afterChars}, reductionRatio=${reductionRatio.toFixed(4)}\n` +
+				`[prompt]\n${truncateForLog(compactSystemPrompt)}\n` +
 				`[before]\n${truncateForLog(beforeCompactText)}\n` +
 				`[after]\n${truncateForLog(content)}`
 			);

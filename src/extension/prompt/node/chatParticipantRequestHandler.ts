@@ -254,10 +254,12 @@ export class ChatParticipantRequestHandler {
 				}
 
 				result = await chatResult;
-				const endpoint = await this._endpointProvider.getChatEndpoint(this.request);
-				result.details = this._authService.copilotToken?.isNoAuthUser ?
-					`${endpoint.name}` :
-					`${endpoint.name} • ${endpoint.multiplier ?? 0}x`;
+				if (!result.details) {
+					const endpoint = await this._endpointProvider.getChatEndpoint(this.request);
+					result.details = this._authService.copilotToken?.isNoAuthUser ?
+						`${endpoint.name}` :
+						`${endpoint.name} • ${endpoint.multiplier ?? 0}x`;
+				}
 			}
 
 			this._conversationStore.addConversation(this.turn.id, this.conversation);
