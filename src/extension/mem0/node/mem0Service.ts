@@ -15,6 +15,15 @@ import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { truncate } from '../../../util/vs/base/common/strings';
 import { IMem0Service, Mem0AddResult, Mem0Memory } from '../common/mem0Types';
 
+/**
+ * Strip injected mem0 context tags from text to prevent recursive memory pollution.
+ * When LLM responses are stored back to mem0, any echoed <mem0_memories> tags
+ * must be removed so fact extraction only sees actual conversation content.
+ */
+export function stripMem0Tags(text: string): string {
+	return text.replace(/<mem0_memories>[\s\S]*?<\/mem0_memories>/g, '').trim();
+}
+
 const DEFAULT_SEARCH_LIMIT = 10;
 const REQUEST_TIMEOUT_MS = 5000;
 const ADD_TIMEOUT_MS = 30000;
@@ -82,7 +91,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 			let existingConfig: Mem0ProjectConfig = {};
 			try {
 				const raw = await this.fileSystemService.readFile(configUri, true);
-				const text = raw.toString();
+				const text = new TextDecoder().decode(raw);
 				existingConfig = JSON.parse(text) as Mem0ProjectConfig;
 				const userId = existingConfig.userId?.trim();
 				if (userId) {

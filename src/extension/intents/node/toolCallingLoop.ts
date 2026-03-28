@@ -38,6 +38,7 @@ import { IInstantiationService } from '../../../util/vs/platform/instantiation/c
 import { ChatResponsePullRequestPart, LanguageModelDataPart2, LanguageModelPartAudience, LanguageModelTextPart, LanguageModelToolResult2, MarkdownString } from '../../../vscodeTypes';
 import { InteractionOutcomeComputer } from '../../inlineChat/node/promptCraftingTypes';
 import { IMem0Service } from '../../mem0/common/mem0Types';
+import { stripMem0Tags } from '../../mem0/node/mem0Service';
 import { ChatVariablesCollection } from '../../prompt/common/chatVariablesCollection';
 import { AnthropicTokenUsageMetadata, Conversation, IResultMetadata, ResponseStreamParticipant, TurnStatus } from '../../prompt/common/conversation';
 import { IBuildPromptContext, InternalToolReference, IToolCall, IToolCallRound } from '../../prompt/common/intents';
@@ -841,7 +842,7 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 		try {
 			const mem0Service: IMem0Service = this._instantiationService.invokeFunction(accessor => accessor.get(IMem0Service));
 			const responseText = lastRound?.response
-				? (Array.isArray(lastRound.response) ? lastRound.response.join('') : lastRound.response)
+				? stripMem0Tags(Array.isArray(lastRound.response) ? lastRound.response.join('') : lastRound.response)
 				: undefined;
 			if (!responseText) {
 				return;

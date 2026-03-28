@@ -16,7 +16,7 @@ import { isUUID } from '../../../../util/vs/base/common/uuid';
 import { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
 import { createExtensionUnitTestingServices } from '../../../test/node/services';
 import { Mem0Memory } from '../../common/mem0Types';
-import { Mem0Service } from '../mem0Service';
+import { Mem0Service, stripMem0Tags } from '../mem0Service';
 
 /**
  * A mock IFetcherService that records calls and returns configurable responses.
@@ -289,6 +289,37 @@ describe('Mem0Service', () => {
 			const persistedRaw = await mockFileSystemService.readFile(mem0ConfigFile);
 			const persisted = JSON.parse(new TextDecoder().decode(persistedRaw)) as { userId?: string };
 			expect(persisted.userId).toBe(body.user_id);
+		});
+	});
+
+	describe('stripMem0Tags', () => {
+		it('should remove mem0_memories tags from text', () => {
+			const input = 'Hello <mem0_memories>\n1. some memory (relevance: 0.92)\n</mem0_memories> world';
+			expect(stripMem0Tags(input)).toBe('Hello  world');
+		});
+
+		it('should return text unchanged when no tags present', () => {
+			expect(stripMem0Tags('no tags here')).toBe('no tags here');
+		});
+
+		it('should remove multiple tag blocks', () => {
+			const input = '<mem0_memories>a</mem0_memories> middle <mem0_memories>b</mem0_memories>';
+			expect(stripMem0Tags(input)).toBe('middle');
+		});
+
+		it('should handle empty string', () => {
+			expect(stripMem0Tags('')).toBe('');
+		});
+
+		it('should handle multiline tag content', () => {
+			const input = `Before
+<mem0_memories>
+The following are long-term memories recalled from mem0.
+1. User prefers dark mode (relevance: 0.95)
+2. Project uses TypeScript (relevance: 0.88)
+</mem0_memories>
+After`;
+			expect(stripMem0Tags(input)).toBe('Before\n\nAfter');
 		});
 	});
 });
