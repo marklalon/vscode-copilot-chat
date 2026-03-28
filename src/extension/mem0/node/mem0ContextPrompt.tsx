@@ -42,7 +42,13 @@ export class Mem0ContextPrompt extends PromptElement<Mem0ContextPromptProps> {
 			return null;
 		}
 
-		if (this.configurationService.getConfig(ConfigKey.Mem0TraceLog)) { this.logService.trace(`[Mem0] Recalled ${memories.length} memories for query`); }
+		if (this.configurationService.getConfig(ConfigKey.Mem0TraceLog)) {
+			const memorySummary = memories.map((m, i) => {
+				const score = m.score !== undefined ? ` (score=${m.score.toFixed(2)})` : '';
+				return `  ${i + 1}. ${m.memory}${score}`;
+			}).join('\n');
+			this.logService.trace(`[Mem0] Recalled ${memories.length} memories for query "${this.props.query}":\n${memorySummary}`);
+		}
 
 		const content = this.formatMemories(memories);
 
