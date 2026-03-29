@@ -7,24 +7,21 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { ChatFetchResponseType, ChatLocation, ChatResponse } from '../../../platform/chat/common/commonTypes';
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
+import { IVSCodeExtensionContext } from '../../../platform/extContext/common/extensionContext';
 import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService, NO_FETCH_TELEMETRY } from '../../../platform/networking/common/fetcherService';
 import { IChatEndpoint, ICreateEndpointBodyOptions, IEndpointBody, IEndpointFetchOptions, IMakeChatRequestOptions } from '../../../platform/networking/common/networking';
 import { getCAPITextPart, rawMessageToCAPI } from '../../../platform/networking/common/openai';
 import { IWorkspaceService } from '../../../platform/workspace/common/workspaceService';
 import { CancellationToken } from '../../../util/vs/base/common/cancellation';
+import { URI } from '../../../util/vs/base/common/uri';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 import { IMem0SmartCompactResolution, IMem0SmartCompactService } from '../common/mem0SmartCompactTypes';
 
-const COMPACT_SYSTEM_PROMPT_PATH = path.resolve(__dirname, '../../../../assets/prompts/compactSystemPrompt.md');
 const COMPACT_CACHE_FILE_PREFIX = 'compact-pre-';
 const MAX_COMPACT_CACHE_FILES = 10;
 const SMART_COMPACT_DETAILS = 'Smart Compact';
-
-async function readCompactSystemPrompt(): Promise<string> {
-	return fs.readFile(COMPACT_SYSTEM_PROMPT_PATH, 'utf-8');
-}
 
 async function pruneCompactCacheFiles(cacheDir: string, logService: ILogService, traceEnabled: boolean): Promise<void> {
 	const entries = await fs.readdir(cacheDir, { withFileTypes: true });
@@ -95,6 +92,7 @@ export class CompactLlmOverrideEndpoint implements IChatEndpoint {
 		@ILogService private readonly logService: ILogService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IWorkspaceService private readonly workspaceService: IWorkspaceService,
+		@IVSCodeExtensionContext private readonly extensionContext: IVSCodeExtensionContext,
 	) { }
 
 	private get traceEnabled(): boolean {
@@ -172,7 +170,8 @@ export class CompactLlmOverrideEndpoint implements IChatEndpoint {
 			}
 		});
 		const nonSystemMessages = sanitized.filter(m => m.role !== 'system');
-		const compactSystemPrompt = await readCompactSystemPrompt();
+		const compactSystemPromptPath = URI.joinPath(this.extensionContext.extensionUri, 'assets', 'prompts', 'compactSystemPrompt.md').fsPath;
+		const compactSystemPrompt = await fs.readFile(compactSystemPromptPath, 'utf-8');
 		const messages = [
 			{ role: 'system', content: compactSystemPrompt },
 			...nonSystemMessages,
