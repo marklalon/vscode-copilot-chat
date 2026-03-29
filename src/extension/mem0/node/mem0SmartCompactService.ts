@@ -298,7 +298,7 @@ export class CompactLlmOverrideEndpoint implements IChatEndpoint {
 
 			if (this.traceEnabled) {
 				this.logService.debug(
-					`[mem0][compact] success compare: url=${compactUrl}, model=${discoveredModelId}, elapsedMs=${elapsedMs}, beforeChars=${beforeChars}, afterChars=${afterChars}, reductionRatio=${reductionRatio.toFixed(4)}\n`
+					`[mem0][compact] success compact: url=${compactUrl}, model=${discoveredModelId}, elapsedMs=${elapsedMs}, beforeChars=${beforeChars}, afterChars=${afterChars}, reductionRatio=${reductionRatio.toFixed(4)}\n`
 					+ `[prompt]\n${truncateForLog(compactSystemPrompt, 100)}\n`
 					+ `[before]\n${truncateForLog(beforeCompactText)}\n`
 					+ `[after]\n${truncateForLog(content)}`
