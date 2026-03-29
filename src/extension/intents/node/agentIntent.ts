@@ -359,6 +359,7 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 		@ILogService private readonly logService: ILogService,
 		@IExperimentationService private readonly expService: IExperimentationService,
 		@IAutomodeService private readonly automodeService: IAutomodeService,
+		@IMem0SmartCompactService private readonly mem0SmartCompactService: IMem0SmartCompactService,
 	) {
 		super(intent, location, endpoint, request, intentOptions, instantiationService, codeMapperService, envService, promptPathRepresentationService, endpointProvider, workspaceService, toolsService, configurationService, editLogService, commandService, telemetryService, notebookService);
 	}
@@ -402,6 +403,9 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 		const budgetThreshold = Math.floor((baseBudget - toolTokens) * 0.85);
 		const safeBudget = useTruncation ? Number.MAX_SAFE_INTEGER : budgetThreshold;
 		const endpoint = toolTokens > 0 ? this.endpoint.cloneWithTokenOverride(safeBudget) : this.endpoint;
+		const compactEndpoint = summarizationEnabled
+			? (await this.mem0SmartCompactService.resolveCompactEndpoint(endpoint)).endpoint
+			: endpoint;
 
 		this.logService.debug(`AgentIntent: rendering with budget=${safeBudget} (baseBudget: ${baseBudget}, toolTokens: ${toolTokens}), summarizationEnabled=${summarizationEnabled}`);
 		let result: RenderPromptResult;
@@ -475,7 +479,7 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 		const renderWithSummarization = async (reason: string, renderProps: AgentPromptProps = props): Promise<RenderPromptResult> => {
 			this.logService.debug(`[Agent] ${reason}, triggering summarization`);
 			try {
-				const renderer = PromptRenderer.create(this.instantiationService, endpoint, this.prompt, {
+				const renderer = PromptRenderer.create(this.instantiationService, compactEndpoint, this.prompt, {
 					...renderProps,
 					triggerSummarize: true,
 				});
@@ -642,7 +646,7 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 				}
 			} else if (postRenderRatio >= 0.75 && (backgroundSummarizer.state === BackgroundSummarizationState.Idle || backgroundSummarizer.state === BackgroundSummarizationState.Failed)) {
 				// At ≥ 75% with no running compaction (or a previous failure) — kick off background work.
-				this._startBackgroundSummarization(backgroundSummarizer, props, endpoint, token, postRenderRatio);
+				this._startBackgroundSummarization(backgroundSummarizer, props, compactEndpoint, token, postRenderRatio);
 			}
 		}
 
