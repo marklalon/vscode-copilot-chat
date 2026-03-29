@@ -339,7 +339,7 @@ export class AgentIntent extends EditCodeIntent {
 	}
 }
 
-class CompactLlmOverrideEndpoint implements IChatEndpoint {
+export class CompactLlmOverrideEndpoint implements IChatEndpoint {
 	constructor(
 		private readonly base: IChatEndpoint,
 		private readonly compactLlmUrl: string,
@@ -347,6 +347,7 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ILogService private readonly logService: ILogService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IWorkspaceService private readonly workspaceService: IWorkspaceService,
 	) { }
 
 	private get traceEnabled(): boolean {
@@ -500,6 +501,7 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 					model: discoveredModelId,
 					messages,
 					temperature: options.requestOptions?.temperature ?? 0,
+					max_tokens: 10000,
 					chat_template_kwargs: { enable_thinking: false },
 					thinking: { type: 'disabled' },
 					stream: false,
@@ -521,13 +523,33 @@ class CompactLlmOverrideEndpoint implements IChatEndpoint {
 			const rawContent = data.choices?.[0]?.message?.content ?? '';
 			// Strip thinking/reasoning blocks that some local LLMs emit despite being asked not to.
 			// Handles <think>...</think>, <thinking>...</thinking>, and <reasoning>...</reasoning>.
-			const content = rawContent.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, '').trim();
+			const COMPACT_PREAMBLE = 'This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n';
+			let content = COMPACT_PREAMBLE + rawContent.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, '').trim();
 			const elapsedMs = Date.now() - requestStartMs;
 			const beforeChars = beforeCompactText.length;
 			const afterChars = content.length;
 			const reductionRatio = beforeChars > 0
 				? ((beforeChars - afterChars) / beforeChars)
 				: 0;
+
+			// Save original pre-compact content to workspace .cache/ for future reference
+			let savedCachePath: string | undefined;
+			try {
+				const workspaceFolders = this.workspaceService.getWorkspaceFolders();
+				if (workspaceFolders.length > 0) {
+					const cacheDir = path.join(workspaceFolders[0].fsPath, '.cache');
+					await fs.mkdir(cacheDir, { recursive: true });
+					const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+					const cacheFileName = `compact-pre-${timestamp}-${requestId.slice(0, 8)}.md`;
+					savedCachePath = path.join(cacheDir, cacheFileName);
+					await fs.writeFile(savedCachePath, beforeCompactText, 'utf-8');
+					content = content + `\n\nIf you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: ${savedCachePath}`;
+					if (this.traceEnabled) { this.logService.info(`[mem0][compact] saved pre-compact content to ${savedCachePath}`); }
+				}
+			} catch (cacheErr) {
+				this.logService.warn(`[mem0][compact] failed to save pre-compact cache: ${cacheErr}`);
+			}
+
 			if (this.traceEnabled) {
 				this.logService.info(
 					`[mem0][compact] success compare: url=${compactUrl}, model=${discoveredModelId}, elapsedMs=${elapsedMs}, beforeChars=${beforeChars}, afterChars=${afterChars}, reductionRatio=${reductionRatio.toFixed(4)}\n` +
