@@ -537,7 +537,7 @@ export class CompactLlmOverrideEndpoint implements IChatEndpoint {
 			try {
 				const workspaceFolders = this.workspaceService.getWorkspaceFolders();
 				if (workspaceFolders.length > 0) {
-					const cacheDir = path.join(workspaceFolders[0].fsPath, '.cache');
+					const cacheDir = path.join(workspaceFolders[0].fsPath, '.vscode', '.cache');
 					await fs.mkdir(cacheDir, { recursive: true });
 					const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 					const cacheFileName = `compact-pre-${timestamp}-${requestId.slice(0, 8)}.md`;
