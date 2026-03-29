@@ -39,24 +39,28 @@ User Message
 
 **Write-back**: Only on the final conversation turn, `toolCallingLoop` sends the user+assistant messages to mem0 asynchronously. mem0 internally uses an LLM to extract and deduplicate facts.
 
-**Smart Compact**: The normal `/compact` flow keeps using Copilot's summarization pipeline, but it can optionally redirect the LLM call to a local OpenAI-compatible endpoint via `github.copilot.chat.mem0.compactLlmEndpoint`.
+**Smart Compact**: The normal `/compact` flow keeps using Copilot's summarization pipeline, but it can optionally redirect the LLM call to a local OpenAI-compatible endpoint via `github.copilot.chat.mem0.compactLlmEndpoint`. When enabled, the original pre-compact transcript is saved under `.vscode/.cache/compact-pre-*.md`, and only the 10 newest snapshots are retained.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `common/mem0Types.ts` | `IMem0Service` interface, `Mem0Memory`, `Mem0AddResult` types |
-| `node/mem0Service.ts` | Service implementation — HTTP client for mem0 REST API |
+| `common/mem0SmartCompactTypes.ts` | `IMem0SmartCompactService` interface for `/compact` local LLM resolution |
+| `node/mem0Service.ts` | Service implementation for mem0 search, add, getAll, and project-scoped user ID resolution |
+| `node/mem0SmartCompactService.ts` | Smart Compact endpoint resolution, local LLM override, prompt loading, and pre-compact cache retention |
 | `node/mem0ContextPrompt.tsx` | TSX prompt component that renders recalled memories |
-| `node/test/mem0Service.spec.ts` | 23 unit tests |
+| `node/test/mem0Service.spec.ts` | Unit tests for mem0 REST integration behavior |
+| `node/test/mem0SmartCompactService.spec.ts` | Unit tests for Smart Compact override and cache pruning |
 
 ### Modified files (outside this directory)
 
 | File | Change |
 |------|--------|
 | `prompts/node/agent/agentPrompt.tsx` | Renders `<Mem0ContextPrompt>` in the prompt hierarchy |
+| `intents/node/agentIntent.ts` | Delegates `/compact` endpoint selection to `IMem0SmartCompactService` |
 | `intents/node/toolCallingLoop.ts` | `_storeMem0Memory()` write-back on last turn |
-| `extension/vscode-node/services.ts` | DI registration: `IMem0Service → Mem0Service` |
+| `extension/vscode-node/services.ts` | DI registration: `IMem0Service -> Mem0Service`, `IMem0SmartCompactService -> Mem0SmartCompactService` |
 | `platform/configuration/common/configurationService.ts` | All `ConfigKey.Mem0*` entries |
 
 ## Settings
@@ -112,7 +116,7 @@ The self-hosted mem0 Docker uses these paths (**no `/v1/` prefix**):
 
 ## Logging
 
-All logs use `[Mem0][userId]` prefix. View in: Output panel → GitHub Copilot Chat.
+mem0 request logs use `[Mem0][userId]`. Smart Compact override logs use `[mem0][compact]`. View them in: Output panel -> GitHub Copilot Chat.
 
 | Level | Message | When |
 |-------|---------|------|
@@ -120,12 +124,16 @@ All logs use `[Mem0][userId]` prefix. View in: Output panel → GitHub Copilot C
 | trace | `[Mem0][userId] add OK: N entries (ADD, UPDATE, ...)` | Successful write-back |
 | trace | `[Mem0][userId] getAll OK: N memories` | Successful getAll |
 | trace | `Recalled N memories for query` | Prompt component found results |
+| info | `[mem0][compact] saved pre-compact content to ...` | Smart Compact wrote a transcript snapshot |
+| info | `[mem0][compact] pruned old pre-compact cache ...` | Old compact snapshots were deleted |
 | warn | `[Mem0][userId] search failed: 404 Not Found` | HTTP error |
 | warn | `[Mem0][userId] search unavailable: AbortError` | Timeout or network error |
 | warn | `[Mem0][userId] add failed: 404 Not Found` | HTTP error |
 | warn | `[Mem0][userId] add unavailable: AbortError` | Timeout or network error |
 | warn | `[Mem0][userId] getAll failed: 404 Not Found` | HTTP error |
 | warn | `[Mem0][userId] getAll unavailable: AbortError` | Timeout or network error |
+| warn | `[mem0][compact] model discovery failed ...` | Smart Compact local model discovery failed |
+| warn | `[mem0][compact] failed to save pre-compact cache ...` | Snapshot persistence failed |
 
 Set log level to **Trace** to see success logs: `Ctrl+Shift+P` → `Developer: Set Log Level` → `Trace`.
 
@@ -134,6 +142,7 @@ Set log level to **Trace** to see success logs: `Ctrl+Shift+P` → `Developer: S
 - **Per-user-turn recall**: mem0 search runs on the first model request of each user turn to avoid repeated recalls during tool-call iterations
 - **Last-turn-only write**: Avoids redundant writes mid-conversation when tool calls are still in progress
 - **Compaction decoupled from mem0**: mem0 no longer owns conversation compaction; `/compact` stays in the summarization pipeline and only swaps the target LLM URL when configured
+- **Snapshot retention**: Smart Compact stores pre-compact transcripts in `.vscode/.cache` and prunes older files to keep only the 10 newest snapshots
 - **Fire-and-forget**: Write-back is async and best-effort — never blocks or fails the chat
 - **Graceful fallback**: All mem0 calls return empty/original on failure
 - **Score filtering**: Reduces noise from low-relevance memories before injecting into prompt
@@ -143,4 +152,5 @@ Set log level to **Trace** to see success logs: `Ctrl+Shift+P` → `Developer: S
 
 ```bash
 npx vitest run src/extension/mem0/node/test/mem0Service.spec.ts
+npx vitest run src/extension/mem0/node/test/mem0SmartCompactService.spec.ts
 ```

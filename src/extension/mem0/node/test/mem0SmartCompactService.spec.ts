@@ -6,7 +6,7 @@
 import { Raw } from '@vscode/prompt-tsx';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ChatFetchResponseType, ChatLocation } from '../../../../platform/chat/common/commonTypes';
 import { ConfigKey, IConfigurationService } from '../../../../platform/configuration/common/configurationService';
 import { InMemoryConfigurationService } from '../../../../platform/configuration/test/common/inMemoryConfigurationService';
@@ -19,23 +19,19 @@ import { DisposableStore } from '../../../../util/vs/base/common/lifecycle';
 import { URI } from '../../../../util/vs/base/common/uri';
 import { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
 import { createExtensionUnitTestingServices } from '../../../test/node/services';
-import { CompactLlmOverrideEndpoint } from '../agentIntent';
-
-// ---------------------------------------------------------------------------
-// Mocks
-// ---------------------------------------------------------------------------
+import { CompactLlmOverrideEndpoint } from '../mem0SmartCompactService';
 
 class MockFetcherService {
 	declare readonly _serviceBrand: undefined;
 
-	readonly fetchCalls: { url: string; options: any }[] = [];
-	fetchHandler: (url: string, options: any) => Promise<Response> = async () => new Response('{}', { status: 200 });
+	readonly fetchCalls: { url: string; options: unknown }[] = [];
+	fetchHandler: (url: string, options: unknown) => Promise<Response> = async () => new Response('{}', { status: 200 });
 
-	readonly onDidFetch = { dispose: () => { } } as any;
-	readonly onDidCompleteFetch = { dispose: () => { } } as any;
+	readonly onDidFetch = { dispose: () => { } } as const;
+	readonly onDidCompleteFetch = { dispose: () => { } } as const;
 
 	getUserAgentLibrary() { return 'test'; }
-	createWebSocket() { return {} as any; }
+	createWebSocket() { return {} as never; }
 	async disconnectAll() { }
 	isAbortError() { return false; }
 	isInternetDisconnectedError() { return false; }
@@ -48,13 +44,13 @@ class MockFetcherService {
 		return { abort: () => { }, signal: {} as AbortSignal };
 	}
 
-	async fetch(url: string, options: any): Promise<Response> {
+	async fetch(url: string, options: unknown): Promise<Response> {
 		this.fetchCalls.push({ url, options });
 		return this.fetchHandler(url, options);
 	}
 
 	respondByUrl(handlers: Record<string, unknown>) {
-		this.fetchHandler = async (url: string) => {
+		this.fetchHandler = async url => {
 			for (const [pattern, body] of Object.entries(handlers)) {
 				if (url.includes(pattern)) {
 					return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -64,8 +60,8 @@ class MockFetcherService {
 		};
 	}
 
-	respondWithError(msg = 'network error') {
-		this.fetchHandler = async () => { throw new Error(msg); };
+	respondWithError(message = 'network error') {
+		this.fetchHandler = async () => { throw new Error(message); };
 	}
 }
 
@@ -75,7 +71,7 @@ function createMockBaseEndpoint(): IChatEndpoint {
 		name: 'test-model',
 		version: '1.0',
 		family: 'test',
-		tokenizer: 'cl100k_base' as any,
+		tokenizer: 'cl100k_base' as never,
 		modelMaxPromptTokens: 8000,
 		maxOutputTokens: 4000,
 		model: 'test-model',
@@ -89,13 +85,13 @@ function createMockBaseEndpoint(): IChatEndpoint {
 		getExtraHeaders: () => ({}),
 		getEndpointFetchOptions: () => ({ suppressIntegrationId: false }),
 		interceptBody: () => { },
-		acquireTokenizer: () => ({ tokenize: () => [], detokenize: () => '' }) as any,
-		createRequestBody: () => ({}) as any,
-		processResponseFromChatEndpoint: (() => { }) as any,
+		acquireTokenizer: () => ({ tokenize: () => [], detokenize: () => '' }) as never,
+		createRequestBody: () => ({}) as never,
+		processResponseFromChatEndpoint: (() => { }) as never,
 		makeChatRequest: async () => ({ type: ChatFetchResponseType.Failed, reason: 'not implemented', requestId: '', serverRequestId: undefined }),
 		makeChatRequest2: async () => ({ type: ChatFetchResponseType.Failed, reason: 'not implemented', requestId: '', serverRequestId: undefined }),
 		cloneWithTokenOverride: function () { return this; },
-	} as any;
+	} as IChatEndpoint;
 }
 
 function textPart(text: string): Raw.ChatCompletionContentPartText {
@@ -121,10 +117,6 @@ const cancelToken: CancellationToken = {
 	onCancellationRequested: Event.None,
 };
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe('CompactLlmOverrideEndpoint', () => {
 	let disposables: DisposableStore;
 	let mockFetcher: MockFetcherService;
@@ -133,50 +125,25 @@ describe('CompactLlmOverrideEndpoint', () => {
 	let workspaceFolderPath: string;
 	let cacheDir: string;
 
-	// The production code reads compactSystemPrompt.md relative to __dirname of agentIntent.ts.
-	// In the test environment __dirname resolves to the source tree, so the relative
-	// path `../assets/prompts/` doesn't exist. Create it on-the-fly for the test suite.
-	// agentIntent.ts __dirname = .../intents/node, path = ../assets/prompts/ = .../intents/assets/prompts/
-	const promptDir = path.join(__dirname, '..', '..', 'assets', 'prompts');
-	const promptFile = path.join(promptDir, 'compactSystemPrompt.md');
-
-	beforeAll(async () => {
-		await fs.mkdir(promptDir, { recursive: true });
-		// Use the real prompt file content
-		const realPromptPath = path.resolve(__dirname, '../../../../assets/prompts/compactSystemPrompt.md');
-		let promptContent: string;
-		try {
-			promptContent = await fs.readFile(realPromptPath, 'utf-8');
-		} catch {
-			promptContent = 'You are a test compact system prompt.';
-		}
-		await fs.writeFile(promptFile, promptContent, 'utf-8');
-	});
-
 	beforeEach(() => {
 		disposables = new DisposableStore();
-		const sc = createExtensionUnitTestingServices(disposables);
+		const serviceCollection = createExtensionUnitTestingServices(disposables);
 		mockFetcher = new MockFetcherService();
-		sc.define(IFetcherService, mockFetcher as any);
+		serviceCollection.define(IFetcherService, mockFetcher as never);
 
-		// Use a temp-like workspace path (OS-agnostic via path.join)
 		workspaceFolderPath = path.join(__dirname, '__test_workspace__');
-		cacheDir = path.join(workspaceFolderPath, '.cache');
-		sc.define(IWorkspaceService, new NullWorkspaceService([URI.file(workspaceFolderPath)]));
+		cacheDir = path.join(workspaceFolderPath, '.vscode', '.cache');
+		serviceCollection.define(IWorkspaceService, new NullWorkspaceService([URI.file(workspaceFolderPath)]));
 
-		const accessor = disposables.add(sc.createTestingAccessor());
+		const accessor = disposables.add(serviceCollection.createTestingAccessor());
 		configService = accessor.get(IConfigurationService) as InMemoryConfigurationService;
 		instantiationService = accessor.get(IInstantiationService);
-
-		// Enable trace for testability
 		configService.setConfig(ConfigKey.Mem0TraceLog, true);
 	});
 
 	afterEach(async () => {
 		disposables.dispose();
-		// Clean up generated cache files
-		try { await fs.rm(cacheDir, { recursive: true, force: true }); } catch { }
-		try { await fs.rmdir(workspaceFolderPath); } catch { }
+		await fs.rm(workspaceFolderPath, { recursive: true, force: true });
 	});
 
 	function createEndpoint(compactLlmUrl = 'http://127.0.0.1:18081'): CompactLlmOverrideEndpoint {
@@ -197,13 +164,8 @@ describe('CompactLlmOverrideEndpoint', () => {
 		});
 	}
 
-	// -----------------------------------------------------------------------
-	// Success path
-	// -----------------------------------------------------------------------
-
 	it('returns compacted content with preamble on success', async () => {
-		const summaryText = '### Summary\n\n**1. Primary Request and Intent**\nUser asked to create a hello world app.';
-		setupMockLlmResponse(summaryText);
+		setupMockLlmResponse('### Summary\n\n**1. Primary Request and Intent**\nUser asked to create a hello world app.');
 
 		const endpoint = createEndpoint();
 		const result = await endpoint.makeChatRequest2(
@@ -215,32 +177,24 @@ describe('CompactLlmOverrideEndpoint', () => {
 		);
 
 		expect(result.type).toBe(ChatFetchResponseType.Success);
-		const value = (result as any).value as string;
+		const value = (result as { value: string }).value;
 		expect(value).toContain('This session is being continued from a previous conversation');
 		expect(value).toContain('Primary Request and Intent');
 	});
 
-	it('strips thinking/reasoning blocks from LLM output', async () => {
-		const rawContent = '<think>internal reasoning here</think>### Summary\n\nClean output.';
-		setupMockLlmResponse(rawContent);
+	it('strips thinking and reasoning blocks from LLM output', async () => {
+		setupMockLlmResponse('<think>internal reasoning here</think>### Summary\n\nClean output.');
 
 		const endpoint = createEndpoint();
-		const result = await endpoint.makeChatRequest2(
-			createOptions([msg('user', 'test')]),
-			cancelToken,
-		);
+		const result = await endpoint.makeChatRequest2(createOptions([msg('user', 'test')]), cancelToken);
 
 		expect(result.type).toBe(ChatFetchResponseType.Success);
-		const value = (result as any).value as string;
+		const value = (result as { value: string }).value;
 		expect(value).not.toContain('<think>');
 		expect(value).toContain('Clean output.');
 	});
 
-	// -----------------------------------------------------------------------
-	// Cache file saving
-	// -----------------------------------------------------------------------
-
-	it('saves pre-compact content to .cache/ and appends path to output', async () => {
+	it('saves pre-compact content to .vscode/.cache and appends the path to output', async () => {
 		setupMockLlmResponse('### Summary\n\nCompacted.');
 
 		const endpoint = createEndpoint();
@@ -253,55 +207,66 @@ describe('CompactLlmOverrideEndpoint', () => {
 		);
 
 		expect(result.type).toBe(ChatFetchResponseType.Success);
-		const value = (result as any).value as string;
-
-		// Should contain the cache file reference
+		const value = (result as { value: string }).value;
 		expect(value).toContain('If you need specific details from before compaction');
-		expect(value).toContain('.cache');
+		expect(value).toContain('.vscode');
 		expect(value).toMatch(/compact-pre-.*\.md/);
 
-		// Verify the cache file was actually written
 		const files = await fs.readdir(cacheDir);
 		expect(files.length).toBe(1);
 		expect(files[0]).toMatch(/^compact-pre-.*\.md$/);
 
-		// Verify cache content contains original messages
 		const cacheContent = await fs.readFile(path.join(cacheDir, files[0]), 'utf-8');
 		expect(cacheContent).toContain('some user message');
 		expect(cacheContent).toContain('some assistant reply');
 	});
 
-	// -----------------------------------------------------------------------
-	// Usage / metrics
-	// -----------------------------------------------------------------------
+	it('keeps only the 10 newest pre-compact cache files', async () => {
+		setupMockLlmResponse('### Summary\n\nCompacted.');
+		await fs.mkdir(cacheDir, { recursive: true });
+
+		for (let i = 0; i < 11; i++) {
+			const fileName = `compact-pre-old-${i.toString().padStart(2, '0')}.md`;
+			const filePath = path.join(cacheDir, fileName);
+			await fs.writeFile(filePath, `old ${i}`, 'utf-8');
+			const timestamp = new Date(Date.now() - ((11 - i) * 1000));
+			await fs.utimes(filePath, timestamp, timestamp);
+		}
+
+		const endpoint = createEndpoint();
+		await endpoint.makeChatRequest2(
+			createOptions([
+				msg('user', 'new user message'),
+				msg('assistant', 'new assistant reply'),
+			]),
+			cancelToken,
+		);
+
+		const files = await fs.readdir(cacheDir);
+		expect(files).toHaveLength(10);
+		expect(files).not.toContain('compact-pre-old-00.md');
+		expect(files).not.toContain('compact-pre-old-01.md');
+
+		const fileContents = await Promise.all(files.map(async file => fs.readFile(path.join(cacheDir, file), 'utf-8')));
+		expect(fileContents.some(content => content.includes('new user message'))).toBe(true);
+	});
 
 	it('returns usage data from the LLM response', async () => {
 		setupMockLlmResponse('### Summary\n\nDone.');
 
 		const endpoint = createEndpoint();
-		const result = await endpoint.makeChatRequest2(
-			createOptions([msg('user', 'test')]),
-			cancelToken,
-		);
+		const result = await endpoint.makeChatRequest2(createOptions([msg('user', 'test')]), cancelToken);
 
 		expect(result.type).toBe(ChatFetchResponseType.Success);
-		const usage = (result as any).usage;
+		const usage = (result as { usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }).usage;
 		expect(usage).toBeDefined();
 		expect(usage.prompt_tokens).toBe(100);
 		expect(usage.completion_tokens).toBe(50);
 		expect(usage.total_tokens).toBe(150);
 	});
 
-	// -----------------------------------------------------------------------
-	// Fallback on model discovery failure
-	// -----------------------------------------------------------------------
-
-	it('falls back to base endpoint when model discovery fails', async () => {
-		mockFetcher.respondByUrl({
-			'/models': 'error',  // will return 200 but invalid shape
-		});
-		// Override to return 500 for models
-		mockFetcher.fetchHandler = async (url: string) => {
+	it('falls back to the base endpoint when model discovery fails', async () => {
+		mockFetcher.fetchHandler = async url => {
 			if (url.includes('/models')) {
 				return new Response('Server Error', { status: 500 });
 			}
@@ -309,21 +274,13 @@ describe('CompactLlmOverrideEndpoint', () => {
 		};
 
 		const endpoint = createEndpoint();
-		const result = await endpoint.makeChatRequest2(
-			createOptions([msg('user', 'test')]),
-			cancelToken,
-		);
+		const result = await endpoint.makeChatRequest2(createOptions([msg('user', 'test')]), cancelToken);
 
-		// Should fall back (base mock returns Failed)
 		expect(result.type).toBe(ChatFetchResponseType.Failed);
 	});
 
-	// -----------------------------------------------------------------------
-	// Fallback on LLM error
-	// -----------------------------------------------------------------------
-
-	it('falls back to base endpoint when LLM request fails', async () => {
-		mockFetcher.fetchHandler = async (url: string) => {
+	it('falls back to the base endpoint when the LLM request fails', async () => {
+		mockFetcher.fetchHandler = async url => {
 			if (url.includes('/models')) {
 				return new Response(JSON.stringify({ data: [{ id: 'test-model' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 			}
@@ -334,76 +291,49 @@ describe('CompactLlmOverrideEndpoint', () => {
 		};
 
 		const endpoint = createEndpoint();
-		const result = await endpoint.makeChatRequest2(
-			createOptions([msg('user', 'test')]),
-			cancelToken,
-		);
+		const result = await endpoint.makeChatRequest2(createOptions([msg('user', 'test')]), cancelToken);
 
-		// Falls back to base (which returns Failed)
 		expect(result.type).toBe(ChatFetchResponseType.Failed);
 	});
 
-	// -----------------------------------------------------------------------
-	// Fallback on network error
-	// -----------------------------------------------------------------------
-
-	it('falls back to base endpoint on network error', async () => {
+	it('falls back to the base endpoint on network error', async () => {
 		mockFetcher.respondWithError('ECONNREFUSED');
 
 		const endpoint = createEndpoint();
-		const result = await endpoint.makeChatRequest2(
-			createOptions([msg('user', 'test')]),
-			cancelToken,
-		);
+		const result = await endpoint.makeChatRequest2(createOptions([msg('user', 'test')]), cancelToken);
 
 		expect(result.type).toBe(ChatFetchResponseType.Failed);
 	});
 
-	// -----------------------------------------------------------------------
-	// Cancellation
-	// -----------------------------------------------------------------------
-
-	it('returns Canceled when token is cancelled', async () => {
+	it('returns canceled when the token is canceled before the request completes', async () => {
 		const cts = new CancellationTokenSource();
-		// Cancel immediately
 		cts.cancel();
-
 		setupMockLlmResponse('### Summary\n\nDone.');
 
 		const endpoint = createEndpoint();
-		const result = await endpoint.makeChatRequest2(
-			createOptions([msg('user', 'test')]),
-			cts.token,
-		);
+		const result = await endpoint.makeChatRequest2(createOptions([msg('user', 'test')]), cts.token);
 
-		// Depending on timing, it's either Canceled or Success
-		// But if the LLM call completes before cancellation check, we accept Success too
 		expect([ChatFetchResponseType.Canceled, ChatFetchResponseType.Success]).toContain(result.type);
 	});
-
-	// -----------------------------------------------------------------------
-	// finishedCb
-	// -----------------------------------------------------------------------
 
 	it('calls finishedCb with the compacted content', async () => {
 		setupMockLlmResponse('### Summary\n\nCallback test.');
 
-		let cbContent = '';
+		let callbackContent = '';
 		const options = createOptions([msg('user', 'test')]);
-		options.finishedCb = async (text: string) => { cbContent = text; };
+		options.finishedCb = async (text: string) => {
+			callbackContent = text;
+			return undefined;
+		};
 
 		const endpoint = createEndpoint();
 		await endpoint.makeChatRequest2(options, cancelToken);
 
-		expect(cbContent).toContain('Callback test.');
-		expect(cbContent).toContain('This session is being continued');
+		expect(callbackContent).toContain('Callback test.');
+		expect(callbackContent).toContain('This session is being continued');
 	});
 
-	// -----------------------------------------------------------------------
-	// Message sanitization
-	// -----------------------------------------------------------------------
-
-	it('sends only non-system messages to LLM with compact system prompt', async () => {
+	it('sends only non-system messages to the local LLM after injecting the compact system prompt', async () => {
 		setupMockLlmResponse('### Summary\n\nSanitized.');
 
 		const endpoint = createEndpoint();
@@ -416,35 +346,27 @@ describe('CompactLlmOverrideEndpoint', () => {
 			cancelToken,
 		);
 
-		// Find the /chat/completions call
-		const completionCall = mockFetcher.fetchCalls.find(c => c.url.includes('/chat/completions'));
-		expect(completionCall).toBeDefined();
-
-		const body = JSON.parse(completionCall!.options.body);
-		// First message should be the compact system prompt (from file)
+		const completionCall = mockFetcher.fetchCalls.find(call => call.url.includes('/chat/completions'));
+		const body = JSON.parse((completionCall?.options as { body: string }).body);
 		expect(body.messages[0].role).toBe('system');
-		// System message from user input should be filtered out; only user + assistant remain
-		const nonSystemMessages = body.messages.filter((m: any) => m.role !== 'system');
+
+		const nonSystemMessages = body.messages.filter((message: { role: string }) => message.role !== 'system');
 		expect(nonSystemMessages.length).toBe(2);
 		expect(nonSystemMessages[0].content).toBe('Hello');
 		expect(nonSystemMessages[1].content).toBe('Hi there');
 	});
 
-	// -----------------------------------------------------------------------
-	// No workspace folder — cache saving skipped gracefully
-	// -----------------------------------------------------------------------
-
-	it('works without workspace folder (cache saving skipped)', async () => {
-		// Re-create services with empty workspace
+	it('works without a workspace folder and skips cache saving', async () => {
 		disposables.dispose();
 		disposables = new DisposableStore();
-		const sc = createExtensionUnitTestingServices(disposables);
+		const serviceCollection = createExtensionUnitTestingServices(disposables);
 		const emptyFetcher = new MockFetcherService();
-		sc.define(IFetcherService, emptyFetcher as any);
-		sc.define(IWorkspaceService, new NullWorkspaceService([])); // no folders
-		const accessor = disposables.add(sc.createTestingAccessor());
-		const inst = accessor.get(IInstantiationService);
+		serviceCollection.define(IFetcherService, emptyFetcher as never);
+		serviceCollection.define(IWorkspaceService, new NullWorkspaceService([]));
+
+		const accessor = disposables.add(serviceCollection.createTestingAccessor());
 		(accessor.get(IConfigurationService) as InMemoryConfigurationService).setConfig(ConfigKey.Mem0TraceLog, true);
+		const instantiation = accessor.get(IInstantiationService);
 
 		emptyFetcher.respondByUrl({
 			'/models': { data: [{ id: 'test-model' }] },
@@ -454,15 +376,11 @@ describe('CompactLlmOverrideEndpoint', () => {
 			},
 		});
 
-		const endpoint = inst.createInstance(CompactLlmOverrideEndpoint, createMockBaseEndpoint(), 'http://127.0.0.1:18081');
-		const result = await endpoint.makeChatRequest2(
-			createOptions([msg('user', 'test')]),
-			cancelToken,
-		);
+		const endpoint = instantiation.createInstance(CompactLlmOverrideEndpoint, createMockBaseEndpoint(), 'http://127.0.0.1:18081');
+		const result = await endpoint.makeChatRequest2(createOptions([msg('user', 'test')]), cancelToken);
 
 		expect(result.type).toBe(ChatFetchResponseType.Success);
-		const value = (result as any).value as string;
-		// Should NOT contain cache file reference since no workspace
+		const value = (result as { value: string }).value;
 		expect(value).not.toContain('If you need specific details from before compaction');
 		expect(value).toContain('No workspace.');
 	});

@@ -62,10 +62,8 @@ $cases = @(
 )
 
 $modes = @(
-    @{ Name = "default"; Extra = @{} },
-    @{ Name = "enable_thinking_false"; Extra = @{ enable_thinking = $false } },
     @{ Name = "chat_template_kwargs_false"; Extra = @{ chat_template_kwargs = @{ enable_thinking = $false } } },
-    @{ Name = "both_flags_false"; Extra = @{ enable_thinking = $false; chat_template_kwargs = @{ enable_thinking = $false } } }
+    @{ Name = "chat_template_kwargs_on"; Extra = @{ chat_template_kwargs = @{ enable_thinking = $true } } }
 )
 
 function Get-JsonObjectFromText {
@@ -233,7 +231,3 @@ $summary | Sort-Object mode | Format-Table -AutoSize
 
 Write-Host "`n=== Per-case Quick View ===" -ForegroundColor Cyan
 $all | Select-Object mode, case, ms, ok, timeout, jsonParsable, hasThinking, factsCount, qualityPass | Format-Table -AutoSize
-
-$outFile = Join-Path $PSScriptRoot ("thinking-onoff-results-{0}.json" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
-$all | ConvertTo-Json -Depth 6 | Set-Content -Path $outFile -Encoding UTF8
-Write-Host "`nSaved raw results to: $outFile" -ForegroundColor Yellow

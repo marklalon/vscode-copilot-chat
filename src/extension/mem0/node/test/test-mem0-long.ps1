@@ -261,7 +261,10 @@ function Evaluate-Quality {
 }
 
 function Invoke-Mem0Case {
-    param([hashtable]$Case)
+    param(
+        [hashtable]$Case,
+        [string]$CaseUserId
+    )
 
     $msgArray = if ($Case.ContainsKey("Messages")) {
         $Case.Messages
@@ -276,7 +279,7 @@ function Invoke-Mem0Case {
 
     $body = @{
         messages = $msgArray
-        user_id = $UserId
+        user_id = $CaseUserId
     } | ConvertTo-Json -Depth 10
 
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
@@ -339,12 +342,19 @@ for ($round = 1; $round -le $Repeats; $round++) {
     Write-Host "`n--- Round $round/$Repeats ---" -ForegroundColor DarkCyan
     Remove-TestUserMemories -BaseUrl $Mem0Url -Uid $UserId
 
+    $caseIndex = 0
     foreach ($case in $testCases) {
+        $caseIndex++
+        $caseUserId = "{0}-r{1}-c{2}" -f $UserId, $round, $caseIndex
+
+        # Isolate each case to avoid cross-case memory pollution.
+        Remove-TestUserMemories -BaseUrl $Mem0Url -Uid $caseUserId
+
         Write-Host "`n$('=' * 60)" -ForegroundColor Cyan
         Write-Host "TEST: $($case.Label)" -ForegroundColor Cyan
         Write-Host "$('=' * 60)" -ForegroundColor Cyan
 
-        $res = Invoke-Mem0Case -Case $case
+        $res = Invoke-Mem0Case -Case $case -CaseUserId $caseUserId
         $all += $res
 
         if ($res.ok) {
@@ -404,10 +414,6 @@ $byCase | Sort-Object case | Format-Table -AutoSize
 
 Write-Host "`n=== Per-case Detail ===" -ForegroundColor Cyan
 $all | Select-Object label, inputChars, ms, ok, count, qualityScore, qualityPass | Format-Table -AutoSize
-
-$outFile = Join-Path $PSScriptRoot ("mem0-only-results-{0}.json" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
-$all | ConvertTo-Json -Depth 6 | Set-Content -Path $outFile -Encoding UTF8
-Write-Host "`nSaved raw results to: $outFile" -ForegroundColor Yellow
 
 Write-Host "`nFinal cleanup..." -ForegroundColor Cyan
 Remove-TestUserMemories -BaseUrl $Mem0Url -Uid $UserId
