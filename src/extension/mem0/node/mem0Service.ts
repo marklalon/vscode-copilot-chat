@@ -10,9 +10,9 @@ import { IFetcherService, NO_FETCH_TELEMETRY } from '../../../platform/networkin
 import { IWorkspaceService } from '../../../platform/workspace/common/workspaceService';
 import { VSBuffer } from '../../../util/vs/base/common/buffer';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
+import { truncate } from '../../../util/vs/base/common/strings';
 import { URI } from '../../../util/vs/base/common/uri';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
-import { truncate } from '../../../util/vs/base/common/strings';
 import { IMem0Service, Mem0AddResult, Mem0Memory } from '../common/mem0Types';
 
 /**
@@ -154,7 +154,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 				const minScore = this.configurationService.getConfig(ConfigKey.Mem0MinRelevanceScore) ?? 0.5;
 				const filtered = results.filter(m => (m.score ?? 1) >= minScore);
 				const elapsedMs = Date.now() - requestStartMs;
-				if (this.traceEnabled) { this.logService.trace(`[Mem0][${userId}] search OK: ${results.length} results, ${filtered.length} after filtering (minScore=${minScore}), elapsedMs=${elapsedMs}`); }
+				if (this.traceEnabled) { this.logService.debug(`[Mem0][${userId}] search OK: ${results.length} results, ${filtered.length} after filtering (minScore=${minScore}), elapsedMs=${elapsedMs}`); }
 				return filtered;
 			} finally {
 				clearTimeout(timer);
@@ -202,7 +202,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 				if (this.traceEnabled) {
 					const events = addResult.results?.map(r => r.event).join(', ') ?? '';
 					const memoryLines = addResult.results?.map(r => truncate(r.memory, 120)).join('\n') ?? '';
-					this.logService.trace(`[Mem0][${userId}] add OK: ${addResult.results?.length ?? 0} entries (${events}), elapsedMs=${elapsedMs}\n${memoryLines}`);
+					this.logService.debug(`[Mem0][${userId}] add OK: ${addResult.results?.length ?? 0} entries (${events}), elapsedMs=${elapsedMs}\n${memoryLines}`);
 				}
 				return addResult;
 			} finally {
@@ -243,7 +243,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 				const data = await response.json() as { results: Mem0Memory[] };
 				const allResults = data.results ?? [];
 				const elapsedMs = Date.now() - requestStartMs;
-				if (this.traceEnabled) { this.logService.trace(`[Mem0][${userId}] getAll OK: ${allResults.length} memories, elapsedMs=${elapsedMs}`); }
+				if (this.traceEnabled) { this.logService.debug(`[Mem0][${userId}] getAll OK: ${allResults.length} memories, elapsedMs=${elapsedMs}`); }
 				return allResults;
 			} finally {
 				clearTimeout(timer);

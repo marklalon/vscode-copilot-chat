@@ -48,7 +48,7 @@ export class Mem0ContextPrompt extends PromptElement<Mem0ContextPromptProps> {
 				const score = m.score !== undefined ? ` (score=${m.score.toFixed(2)})` : '';
 				return `  ${i + 1}. ${truncate(m.memory, 120)}${score}`;
 			}).join('\n');
-			this.logService.trace(`[Mem0] Recalled ${memories.length} memories for query "${truncate(this.props.query, 80)}":\n${memorySummary}`);
+			this.logService.debug(`[Mem0] Recalled ${memories.length} memories for query "${truncate(this.props.query, 80)}":\n${memorySummary}`);
 		}
 
 		const content = this.formatMemories(memories);

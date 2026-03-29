@@ -120,12 +120,12 @@ mem0 request logs use `[Mem0][userId]`. Smart Compact override logs use `[mem0][
 
 | Level | Message | When |
 |-------|---------|------|
-| trace | `[Mem0][userId] search OK: N results, M after filtering` | Successful search |
-| trace | `[Mem0][userId] add OK: N entries (ADD, UPDATE, ...)` | Successful write-back |
-| trace | `[Mem0][userId] getAll OK: N memories` | Successful getAll |
-| trace | `Recalled N memories for query` | Prompt component found results |
-| info | `[mem0][compact] saved pre-compact content to ...` | Smart Compact wrote a transcript snapshot |
-| info | `[mem0][compact] pruned old pre-compact cache ...` | Old compact snapshots were deleted |
+| debug | `[Mem0][userId] search OK: N results, M after filtering` | Successful search |
+| debug | `[Mem0][userId] add OK: N entries (ADD, UPDATE, ...)` | Successful write-back |
+| debug | `[Mem0][userId] getAll OK: N memories` | Successful getAll |
+| debug | `Recalled N memories for query` | Prompt component found results |
+| debug | `[mem0][compact] saved pre-compact content to ...` | Smart Compact wrote a transcript snapshot |
+| debug | `[mem0][compact] pruned old pre-compact cache ...` | Old compact snapshots were deleted |
 | warn | `[Mem0][userId] search failed: 404 Not Found` | HTTP error |
 | warn | `[Mem0][userId] search unavailable: AbortError` | Timeout or network error |
 | warn | `[Mem0][userId] add failed: 404 Not Found` | HTTP error |
@@ -135,7 +135,7 @@ mem0 request logs use `[Mem0][userId]`. Smart Compact override logs use `[mem0][
 | warn | `[mem0][compact] model discovery failed ...` | Smart Compact local model discovery failed |
 | warn | `[mem0][compact] failed to save pre-compact cache ...` | Snapshot persistence failed |
 
-Set log level to **Trace** to see success logs: `Ctrl+Shift+P` → `Developer: Set Log Level` → `Trace`.
+Set log level to **Debug** to see success logs: `Ctrl+Shift+P` → `Developer: Set Log Level` → `Debug`.
 
 ## Design Decisions
 

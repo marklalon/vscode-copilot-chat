@@ -53,7 +53,7 @@ async function pruneCompactCacheFiles(cacheDir: string, logService: ILogService,
 	const deletionResults = await Promise.allSettled(staleFiles.map(async filePath => {
 		await fs.unlink(filePath);
 		if (traceEnabled) {
-			logService.info(`[mem0][compact] pruned old pre-compact cache ${filePath}`);
+			logService.debug(`[mem0][compact] pruned old pre-compact cache ${filePath}`);
 		}
 	}));
 
@@ -191,7 +191,7 @@ export class CompactLlmOverrideEndpoint implements IChatEndpoint {
 			try {
 				const baseResponse = await this.base.makeChatRequest2(options, token);
 				if (this.traceEnabled) {
-					this.logService.info('[mem0][compact] fallback to base endpoint succeeded');
+					this.logService.debug('[mem0][compact] fallback to base endpoint succeeded');
 				}
 				return baseResponse;
 			} catch (fallbackError) {
@@ -290,7 +290,7 @@ export class CompactLlmOverrideEndpoint implements IChatEndpoint {
 					await pruneCompactCacheFiles(cacheDir, this.logService, this.traceEnabled);
 					content = content + `\n\nIf you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: ${savedCachePath}`;
 					if (this.traceEnabled) {
-						this.logService.info(`[mem0][compact] saved pre-compact content to ${savedCachePath}`);
+						this.logService.debug(`[mem0][compact] saved pre-compact content to ${savedCachePath}`);
 					}
 				}
 			} catch (cacheErr) {
@@ -298,7 +298,7 @@ export class CompactLlmOverrideEndpoint implements IChatEndpoint {
 			}
 
 			if (this.traceEnabled) {
-				this.logService.info(
+				this.logService.debug(
 					`[mem0][compact] success compare: url=${compactUrl}, model=${discoveredModelId}, elapsedMs=${elapsedMs}, beforeChars=${beforeChars}, afterChars=${afterChars}, reductionRatio=${reductionRatio.toFixed(4)}\n`
 					+ `[prompt]\n${truncateForLog(compactSystemPrompt, 100)}\n`
 					+ `[before]\n${truncateForLog(beforeCompactText)}\n`
