@@ -481,6 +481,7 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 			try {
 				const renderer = PromptRenderer.create(this.instantiationService, compactEndpoint, this.prompt, {
 					...renderProps,
+					endpoint: compactEndpoint,
 					triggerSummarize: true,
 				});
 				return await renderer.render(progress, token);
@@ -719,7 +720,7 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 		contextRatio: number,
 	): void {
 		this.logService.debug(`[Agent] context at ${(contextRatio * 100).toFixed(0)}% — starting background compaction`);
-		const snapshotProps: AgentPromptProps = { ...props, promptContext: { ...props.promptContext } };
+		const snapshotProps: AgentPromptProps = { ...props, endpoint, promptContext: { ...props.promptContext } };
 		const bgRenderer = PromptRenderer.create(this.instantiationService, endpoint, this.prompt, {
 			...snapshotProps,
 			triggerSummarize: true,
