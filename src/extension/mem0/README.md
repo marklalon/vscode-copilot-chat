@@ -154,3 +154,13 @@ Set log level to **Debug** to see success logs: `Ctrl+Shift+P` → `Developer: S
 npx vitest run src/extension/mem0/node/test/mem0Service.spec.ts
 npx vitest run src/extension/mem0/node/test/mem0SmartCompactService.spec.ts
 ```
+
+### Real mem0 E2E (add -> clear -> verify)
+
+Requires a running mem0 server (for example `http://127.0.0.1:18000`).
+
+```powershell
+powershell -ExecutionPolicy Bypass -File src/extension/mem0/node/test/test-mem0-clear-e2e.ps1 -Mem0Url http://127.0.0.1:18000 -UserId workspace:e2e-clear-test
+```
+
+If your mem0 server enables API-key auth, pass `-ApiKey <your_key>`.

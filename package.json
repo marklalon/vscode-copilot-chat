@@ -2481,6 +2481,11 @@
         "category": "Chat"
       },
       {
+        "command": "github.copilot.chat.mem0.clearWorkspaceMemory",
+        "title": "%github.copilot.command.mem0.clearWorkspaceMemory%",
+        "category": "Chat"
+      },
+      {
         "command": "github.copilot.terminal.explainTerminalLastCommand",
         "title": "%github.copilot.command.explainTerminalLastCommand%",
         "category": "Chat"
@@ -3252,7 +3257,7 @@
           "github.copilot.chat.mem0.enabled": {
             "type": "boolean",
             "default": false,
-            "markdownDescription": "Enable mem0 integration for long-term memory recall and automatic context injection."
+            "markdownDescription": "Enable mem0 integration for long-term memory recall and automatic context injection. [clear workspace memory](command:github.copilot.chat.mem0.clearWorkspaceMemory)"
           },
           "github.copilot.chat.mem0.endpoint": {
             "type": "string",
@@ -5239,6 +5244,10 @@
         {
           "command": "github.copilot.chat.tools.memory.clearMemories",
           "when": "config.github.copilot.chat.tools.memory.enabled"
+        },
+        {
+          "command": "github.copilot.chat.mem0.clearWorkspaceMemory",
+          "when": "config.github.copilot.chat.mem0.enabled"
         },
         {
           "command": "github.copilot.sessions.refreshChanges",

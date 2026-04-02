@@ -51,7 +51,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 	}
 
 	private get endpoint(): string {
-		return this.configurationService.getConfig(ConfigKey.Mem0Endpoint) || 'http://127.0.0.1:8080';
+		return this.configurationService.getConfig(ConfigKey.Mem0Endpoint);
 	}
 
 	private get enabled(): boolean {
@@ -76,6 +76,10 @@ export class Mem0Service extends Disposable implements IMem0Service {
 			return undefined;
 		}
 		return URI.joinPath(workspaceFolder, MEM0_CONFIG_DIR);
+	}
+
+	private getMemoriesUrl(userId: string): string {
+		return `${this.endpoint}/memories?user_id=${encodeURIComponent(userId)}`;
 	}
 
 	private async getUserId(): Promise<string> {
@@ -193,7 +197,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 
 				if (!response.ok) {
 					const elapsedMs = Date.now() - requestStartMs;
-					this.logService.warn(`[Mem0][${userId}] add failed: ${response.status} ${response.statusText}, elapsedMs=${elapsedMs}`);
+					this.logService.warn(`[Mem0][${userId}] add failed at ${this.endpoint}: ${response.status} ${response.statusText}, elapsedMs=${elapsedMs}`);
 					return undefined;
 				}
 
@@ -221,6 +225,10 @@ export class Mem0Service extends Disposable implements IMem0Service {
 		}
 
 		const userId = await this.getUserId();
+		return this.getAllForUser(userId);
+	}
+
+	private async getAllForUser(userId: string): Promise<readonly Mem0Memory[]> {
 
 		const requestStartMs = Date.now();
 
@@ -228,7 +236,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 			const abort = this.fetcherService.makeAbortController();
 			const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
 			try {
-				const response = await this.fetcherService.fetch(`${this.endpoint}/memories?user_id=${encodeURIComponent(userId)}`, {
+				const response = await this.fetcherService.fetch(this.getMemoriesUrl(userId), {
 					callSite: NO_FETCH_TELEMETRY,
 					method: 'GET',
 					signal: abort.signal,
@@ -253,5 +261,78 @@ export class Mem0Service extends Disposable implements IMem0Service {
 			this.logService.warn(`[Mem0][${userId}] getAll unavailable: ${e}, elapsedMs=${elapsedMs}`);
 			return [];
 		}
+	}
+
+	private async deleteAllForUser(userId: string): Promise<boolean> {
+		const requestStartMs = Date.now();
+
+		try {
+			const abort = this.fetcherService.makeAbortController();
+			const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+			try {
+				const requestMethod = 'DELETE' as unknown as 'GET';
+				const response = await this.fetcherService.fetch(this.getMemoriesUrl(userId), {
+					callSite: NO_FETCH_TELEMETRY,
+					method: requestMethod,
+					signal: abort.signal,
+				});
+
+				if (!response.ok) {
+					const elapsedMs = Date.now() - requestStartMs;
+					this.logService.warn(`[Mem0][${userId}] clear failed: ${response.status} ${response.statusText}, elapsedMs=${elapsedMs}`);
+					return false;
+				}
+
+				const elapsedMs = Date.now() - requestStartMs;
+				if (this.traceEnabled) {
+					this.logService.debug(`[Mem0][${userId}] clear request OK, elapsedMs=${elapsedMs}`);
+				}
+				return true;
+			} finally {
+				clearTimeout(timer);
+			}
+		} catch (e) {
+			const elapsedMs = Date.now() - requestStartMs;
+			this.logService.warn(`[Mem0][${userId}] clear unavailable: ${e}, elapsedMs=${elapsedMs}`);
+			return false;
+		}
+	}
+
+	async clearWorkspaceMemories(): Promise<boolean> {
+		if (!this.enabled) {
+			return false;
+		}
+
+		const userId = await this.getUserId();
+
+		const cleared = await this.deleteAllForUser(userId);
+		if (!cleared) {
+			return false;
+		}
+
+		const remainingAfterFirstClear = await this.getAllForUser(userId);
+		if (remainingAfterFirstClear.length === 0) {
+			if (this.traceEnabled) {
+				this.logService.debug(`[Mem0][${userId}] clear verified empty after first attempt`);
+			}
+			return true;
+		}
+
+		this.logService.warn(`[Mem0][${userId}] clear left ${remainingAfterFirstClear.length} memories, retrying once`);
+		const clearedOnRetry = await this.deleteAllForUser(userId);
+		if (!clearedOnRetry) {
+			return false;
+		}
+
+		const remainingAfterRetry = await this.getAllForUser(userId);
+		if (remainingAfterRetry.length > 0) {
+			this.logService.warn(`[Mem0][${userId}] clear retry left ${remainingAfterRetry.length} memories`);
+			return false;
+		}
+
+		if (this.traceEnabled) {
+			this.logService.debug(`[Mem0][${userId}] clear verified empty after retry`);
+		}
+		return true;
 	}
 }

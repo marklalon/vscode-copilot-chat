@@ -60,6 +60,12 @@ export interface IMem0Service {
 	 * Get all memories for the current user.
 	 */
 	getAll(): Promise<readonly Mem0Memory[]>;
+
+	/**
+	 * Clear all memories for the current workspace-scoped user.
+	 * Returns true when the request succeeds.
+	 */
+	clearWorkspaceMemories(): Promise<boolean>;
 }
 
 export const IMem0Service = createServiceIdentifier<IMem0Service>('IMem0Service');

@@ -265,6 +265,97 @@ describe('Mem0Service', () => {
 		});
 	});
 
+	// ── clearWorkspaceMemories ──────────────────────────────
+
+	describe('clearWorkspaceMemories', () => {
+		it('returns false when disabled', async () => {
+			await configService.setConfig(ConfigKey.Mem0Enabled, false);
+			const result = await service.clearWorkspaceMemories();
+			expect(result).toBe(false);
+			expect(mockFetcher.fetchCalls).toHaveLength(0);
+		});
+
+		it('calls DELETE /memories with user_id', async () => {
+			mockFetcher.fetchHandler = async (url, options) => {
+				if (options.method === 'DELETE') {
+					return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+				}
+
+				if (options.method === 'GET') {
+					return new Response(JSON.stringify({ results: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+				}
+
+				throw new Error(`unexpected request: ${options.method} ${url}`);
+			};
+
+			const result = await service.clearWorkspaceMemories();
+			expect(result).toBe(true);
+
+			expect(mockFetcher.fetchCalls).toHaveLength(2);
+
+			const deleteCall = mockFetcher.fetchCalls[0];
+			expect(deleteCall.url).toContain('/memories?user_id=test-user');
+			expect(deleteCall.options.method).toBe('DELETE');
+
+			const verifyCall = mockFetcher.fetchCalls[1];
+			expect(verifyCall.url).toContain('/memories?user_id=test-user');
+			expect(verifyCall.options.method).toBe('GET');
+		});
+
+		it('retries clear once when memories remain after the first delete', async () => {
+			let getCount = 0;
+			mockFetcher.fetchHandler = async (_url, options) => {
+				if (options.method === 'DELETE') {
+					return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+				}
+
+				if (options.method === 'GET') {
+					getCount++;
+					const results = getCount === 1 ? [makeMemory({ memory: 'still here' })] : [];
+					return new Response(JSON.stringify({ results }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+				}
+
+				throw new Error(`unexpected request: ${options.method}`);
+			};
+
+			const result = await service.clearWorkspaceMemories();
+			expect(result).toBe(true);
+			expect(mockFetcher.fetchCalls.map(call => call.options.method)).toEqual(['DELETE', 'GET', 'DELETE', 'GET']);
+		});
+
+		it('returns false when memories remain after retry', async () => {
+			mockFetcher.fetchHandler = async (_url, options) => {
+				if (options.method === 'DELETE') {
+					return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+				}
+
+				if (options.method === 'GET') {
+					return new Response(JSON.stringify({ results: [makeMemory({ memory: 'still here' })] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+				}
+
+				throw new Error(`unexpected request: ${options.method}`);
+			};
+
+			const result = await service.clearWorkspaceMemories();
+			expect(result).toBe(false);
+			expect(mockFetcher.fetchCalls.map(call => call.options.method)).toEqual(['DELETE', 'GET', 'DELETE', 'GET']);
+		});
+
+		it('returns false on HTTP error', async () => {
+			mockFetcher.fetchHandler = async () => new Response('err', { status: 500 });
+
+			const result = await service.clearWorkspaceMemories();
+			expect(result).toBe(false);
+		});
+
+		it('returns false on network error', async () => {
+			mockFetcher.respondWithError();
+
+			const result = await service.clearWorkspaceMemories();
+			expect(result).toBe(false);
+		});
+	});
+
 	// ── userId resolution ────────────────────────────────────
 
 	describe('userId resolution', () => {
