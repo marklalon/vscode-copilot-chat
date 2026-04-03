@@ -27,6 +27,7 @@ export function stripMem0Tags(text: string): string {
 const DEFAULT_SEARCH_LIMIT = 10;
 const REQUEST_TIMEOUT_MS = 5000;
 const ADD_TIMEOUT_MS = 30000;
+const DELETE_TIMEOUT_MS = 10000;
 const MEM0_CONFIG_DIR = '.vscode';
 const MEM0_CONFIG_FILE = 'mem0.json';
 
@@ -268,7 +269,7 @@ export class Mem0Service extends Disposable implements IMem0Service {
 
 		try {
 			const abort = this.fetcherService.makeAbortController();
-			const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+			const timer = setTimeout(() => abort.abort(), DELETE_TIMEOUT_MS);
 			try {
 				const requestMethod = 'DELETE' as unknown as 'GET';
 				const response = await this.fetcherService.fetch(this.getMemoriesUrl(userId), {
@@ -304,35 +305,37 @@ export class Mem0Service extends Disposable implements IMem0Service {
 		}
 
 		const userId = await this.getUserId();
+		const MAX_RETRIES = 10;
 
-		const cleared = await this.deleteAllForUser(userId);
-		if (!cleared) {
-			return false;
-		}
-
-		const remainingAfterFirstClear = await this.getAllForUser(userId);
-		if (remainingAfterFirstClear.length === 0) {
-			if (this.traceEnabled) {
-				this.logService.debug(`[Mem0][${userId}] clear verified empty after first attempt`);
+		for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+			const cleared = await this.deleteAllForUser(userId);
+			if (!cleared) {
+				this.logService.warn(`[Mem0][${userId}] clear failed on attempt ${attempt}/${MAX_RETRIES}`);
+				if (attempt < MAX_RETRIES) {
+					await new Promise(r => setTimeout(r, 100));
+					continue;
+				}
+				return false;
 			}
-			return true;
+
+			const remaining = await this.getAllForUser(userId);
+			if (remaining.length === 0) {
+				if (this.traceEnabled) {
+					this.logService.debug(`[Mem0][${userId}] clear verified empty after ${attempt} attempt${attempt > 1 ? 's' : ''}`);
+				}
+				return true;
+			}
+
+			if (attempt < MAX_RETRIES) {
+				this.logService.warn(`[Mem0][${userId}] clear attempt ${attempt}/${MAX_RETRIES} left ${remaining.length} memories, retrying...`);
+				// Small delay before retry to allow mem0 service to process
+				await new Promise(r => setTimeout(r, 100));
+			} else {
+				this.logService.warn(`[Mem0][${userId}] clear failed after ${MAX_RETRIES} attempts, ${remaining.length} memories remain`);
+				return false;
+			}
 		}
 
-		this.logService.warn(`[Mem0][${userId}] clear left ${remainingAfterFirstClear.length} memories, retrying once`);
-		const clearedOnRetry = await this.deleteAllForUser(userId);
-		if (!clearedOnRetry) {
-			return false;
-		}
-
-		const remainingAfterRetry = await this.getAllForUser(userId);
-		if (remainingAfterRetry.length > 0) {
-			this.logService.warn(`[Mem0][${userId}] clear retry left ${remainingAfterRetry.length} memories`);
-			return false;
-		}
-
-		if (this.traceEnabled) {
-			this.logService.debug(`[Mem0][${userId}] clear verified empty after retry`);
-		}
-		return true;
+		return false;
 	}
 }
