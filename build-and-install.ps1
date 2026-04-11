@@ -1,6 +1,11 @@
 # build-and-install.ps1
 # Re-launches itself as a detached process to survive VS Code terminal shutdown.
 
+if ($env:TERM_PROGRAM -eq 'vscode' -or $env:VSCODE_INJECTION -eq '1') {
+    Write-Host '请在独立的终端（如 PowerShell 或 Windows Terminal）中运行此脚本，不要在 VS Code 内置终端中运行。' -ForegroundColor Yellow
+    exit 1
+}
+
 if (-not $env:VSCODE_BUILD_DETACHED) {
     $env:VSCODE_BUILD_DETACHED = "1"
     Start-Process powershell.exe -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $MyInvocation.MyCommand.Path
@@ -11,16 +16,22 @@ $ProjectDir = Split-Path $MyInvocation.MyCommand.Path
 
 Set-Location $ProjectDir
 
-Write-Host '=== [1/5] Compiling...' -ForegroundColor Cyan
-npm run compile
-if ($LASTEXITCODE -ne 0) { Write-Host 'Compile failed!' -ForegroundColor Red; pause; exit 1 }
-
-Write-Host '=== [2/5] Packaging VSIX...' -ForegroundColor Cyan
+Write-Host '=== [1/5] Building (release)...' -ForegroundColor Cyan
 Copy-Item 'package.json' 'package.json.bak' -Force
-npm run package
-$packExit = $LASTEXITCODE
+npm run build
+$buildExit = $LASTEXITCODE
+if ($buildExit -ne 0) {
+    Copy-Item 'package.json.bak' 'package.json' -Force
+    Remove-Item 'package.json.bak' -Force
+    Write-Host 'Build failed!' -ForegroundColor Red; pause; exit 1
+}
+
 Copy-Item 'package.json.bak' 'package.json' -Force
 Remove-Item 'package.json.bak' -Force
+
+Write-Host '=== [2/5] Packaging VSIX...' -ForegroundColor Cyan
+npx vsce package --no-dependencies
+$packExit = $LASTEXITCODE
 if ($packExit -ne 0) { Write-Host 'Package failed!' -ForegroundColor Red; pause; exit 1 }
 
 $vsix = Get-ChildItem -Path $ProjectDir -Filter '*.vsix' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
